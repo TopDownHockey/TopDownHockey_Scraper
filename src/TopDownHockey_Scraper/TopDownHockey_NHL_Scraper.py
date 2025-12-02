@@ -371,6 +371,8 @@ _NAME_CORRECTIONS.update(ESPN_NAME_CORRECTIONS)
 
 # ==================================
 
+print('6.1.13 coming your way')
+
 def scrape_schedule(start_date, end_date):
     
     """
