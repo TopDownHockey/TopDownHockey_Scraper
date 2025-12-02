@@ -1,0 +1,3 @@
+include src/TopDownHockey_Scraper/portrait_links.csv
+recursive-include src/TopDownHockey_Scraper *.csv
+
