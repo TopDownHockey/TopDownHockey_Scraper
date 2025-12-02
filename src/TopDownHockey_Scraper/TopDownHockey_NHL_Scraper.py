@@ -264,7 +264,7 @@ _NAME_CORRECTIONS = {
     'SAMUEL MONTEMBAULT': 'SAM MONTEMBAULT',
     'MATT GRZELCYK': 'MATTHEW GRZELCYK',
     'MATEJ BLUMEL': 'MATEJ BLAMEL',
-    'SAMUEL MONTEMBEAULT': 'SAM MONTEMBEAULT'
+    'SAMUEL MONTEMBEAULT': 'SAM MONTENBAULT'
 }
 
 
@@ -493,12 +493,7 @@ def scrape_html_roster(season, game_id, page=None):
             pass
     
     # OPTIMIZED: Use lxml directly instead of BeautifulSoup for faster parsing
-
-    if type(page) == str:
-        doc = html.fromstring(page)
-
-    else:
-        doc = html.fromstring(page.content.decode('ISO-8859-1'))
+    doc = html.fromstring(page.content.decode('ISO-8859-1'))
 
     # XPath to find td elements with align='center', class containing 'teamHeading' and 'border', width='50%'
     teamsoup = doc.xpath("//td[@align='center' and @width='50%' and contains(@class, 'teamHeading') and contains(@class, 'border')]")
@@ -644,7 +639,7 @@ def scrape_html_roster(season, game_id, page=None):
 
     return roster_df 
 
-def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=None, store_html=None, roster_cache = None):
+def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=None):
     """
     Scrape HTML shifts pages.
     
@@ -654,12 +649,352 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         live: Boolean flag for live games
         home_page: Optional pre-fetched requests.Response object for home shifts page. If None, will fetch.
         away_page: Optional pre-fetched requests.Response object for away shifts page. If None, will fetch.
-        store_html: Optional dictionary to store raw HTML content. If provided, will store 'gs0' HTML.
     
     Returns:
         DataFrame with shift information
     """
-    
+    goalie_names = ['AARON DELL',
+                     'ADAM HUSKA',
+                     'ADAM WERNER',
+                     'ADAM WILCOX',
+                     'ADIN HILL',
+                     'AKIRA SCHMID',
+                     'AL MONTOYA',
+                     'ALEKSEI KOLOSOV',
+                     'ALES STEZKA',
+                     'ALEX AULD',
+                     'ALEX LYON',
+                     'ALEX NEDELJKOVIC',
+                     'ALEX PECHURSKI',
+                     'ALEX SALAK',
+                     'ALEX STALOCK',
+                     'ALEXANDAR GEORGIEV',
+                     'ALEXEI MELNICHUK',
+                     'ALLEN YORK',
+                     'ANDERS LINDBACK',
+                     'ANDERS NILSSON',
+                     'ANDREI VASILEVSKIY',
+                     'ANDREW HAMMOND',
+                     'ANDREW RAYCROFT',
+                     'ANDREY MAKAROV',
+                     'ANTERO NIITTYMAKI',
+                     'ANTHONY STOLARZ',
+                     'ANTOINE BIBEAU',
+                     'ANTON FORSBERG',
+                     'ANTON KHUDOBIN',
+                     'ANTTI NIEMI',
+                     'ANTTI RAANTA',
+                     'ARTURS SILOVS',
+                     'ARTYOM ZAGIDULIN',
+                     'ARVID SODERBLOM',
+                     'BEN BISHOP',
+                     'BEN SCRIVENS',
+                     'BRAD THIESSEN',
+                     'BRADEN HOLTBY',
+                     'BRANDON HALVERSON',
+                     'BRENT JOHNSON',
+                     'BRENT KRAHN',
+                     'BRIAN BOUCHER',
+                     'BRIAN ELLIOTT',
+                     'BRIAN FOSTER',
+                     'CAL PETERSEN',
+                     'CALVIN HEETER',
+                     'CALVIN PETERSEN',
+                     'CALVIN PICKARD',
+                     'CAM TALBOT',
+                     'CAM WARD',
+                     'CAREY PRICE',
+                     'CARTER HART',
+                     'CARTER HUTTON',
+                     'CASEY DESMITH',
+                     'CAYDEN PRIMEAU',
+                     'CEDRICK DESJARDINS',
+                     'CHAD JOHNSON',
+                     'CHARLIE LINDGREN',
+                     'CHRIS BECKFORD-TSEU',
+                     'CHRIS DRIEDGER',
+                     'CHRIS GIBSON',
+                     'CHRIS HOLT',
+                     'CHRIS MASON',
+                     'CHRIS OSGOOD',
+                     'COLLIN DELIA',
+                     'CONNOR HELLEBUYCK',
+                     'CONNOR INGRAM',
+                     'CONNOR KNAPP',
+                     'COREY CRAWFORD',
+                     'CORY SCHNEIDER',
+                     'CRAIG ANDERSON',
+                     'CRISTOBAL HUET',
+                     'CRISTOPHER NILSTORP',
+                     'CURTIS JOSEPH',
+                     'CURTIS MCELHINNEY',
+                     'CURTIS SANFORD',
+                     'DAN CLOUTIER',
+                     'DAN ELLIS',
+                     'DAN VLADAR',
+                     'DANIEL LACOSTA',
+                     'DANIEL TAYLOR',
+                     'DANIIL TARASOV',
+                     'DANY SABOURIN',
+                     'DARCY KUEMPER',
+                     'DAVID AEBISCHER',
+                     'DAVID AYRES',
+                     'DAVID LENEVEU',
+                     'DAVID RITTICH',
+                     'DENNIS HILDEBY',
+                     'DEVAN DUBNYK',
+                     'DEVIN COOLEY',
+                     'DEVON LEVI',
+                     'DIMITRI PATZOLD',
+                     'DOMINIK HASEK',
+                     'DREW COMMESSO',
+                     'DREW MACINTYRE',
+                     'DUSTIN TOKARSKI',
+                     'DUSTIN WOLF',
+                     'DWAYNE ROLOSON',
+                     'DYLAN FERGUSON',
+                     'DYLAN WELLS',
+                     'EDDIE LACK',
+                     'EDWARD PASQUALE',
+                     'EETU MAKINIEMI',
+                     'ELVIS MERZLIKINS',
+                     'ERIC COMRIE',
+                     'ERIK ERSBERG',
+                     'ERIK KALLGREN',
+                     'ERIK PORTILLO',
+                     'EVGENI NABOKOV',
+                     'FELIX SANDSTROM',
+                     'FILIP GUSTAVSSON',
+                     'FREDERIK ANDERSEN',
+                     'FREDRIK NORRENA',
+                     'GARRET SPARKS',
+                     'GEORGI ROMANOV',
+                     'GILLES SENN',
+                     'HANNU TOIVONEN',
+                     'HARRI SATERI',
+                     'HENRIK KARLSSON',
+                     'HENRIK LUNDQVIST',
+                     'HUGO ALNEFELT',
+                     'HUNTER MISKA',
+                     'HUNTER SHEPARD',
+                     'IGOR SHESTERKIN',
+                     'IIRO TARKKI',
+                     'ILYA BRYZGALOV',
+                     'ILYA SAMSONOV',
+                     'ILYA SOROKIN',
+                     'IVAN FEDOTOV',
+                     'IVAN PROSVETOV',
+                     'J-F BERUBE',
+                     'JACK CAMPBELL',
+                     'JACK LAFONTAINE',
+                     'JACOB MARKSTROM',
+                     'JAKE ALLEN',
+                     'JAKE OETTINGER',
+                     'JAKUB DOBES',
+                     'JAKUB SKAREK',
+                     'JAMES REIMER',
+                     'JARED COREAU',
+                     'JAROSLAV HALAK',
+                     'JASON KASDORF',
+                     'JASON LABARBERA',
+                     'JAXSON STAUBER',
+                     'JEAN-SEBASTIEN AUBIN',
+                     'JEAN-SEBASTIEN GIGUERE',
+                     'JEFF DESLAURIERS',
+                     'JEFF FRAZEE',
+                     'JEFF GLASS',
+                     'JEFF ZATKOFF',
+                     'JEREMY DUCHESNE',
+                     'JEREMY SMITH',
+                     'JEREMY SWAYMAN',
+                     'JESPER WALLSTEDT',
+                     'JET GREAVES',
+                     'JHONAS ENROTH',
+                     'JIMMY HOWARD',
+                     'JIRI PATERA',
+                     'JOACIM ERIKSSON',
+                     'JOCELYN THIBAULT',
+                     'JOEL BLOMQVIST',
+                     'JOEL HOFER',
+                     'JOEY DACCORD',
+                     'JOEY MACDONALD',
+                     'JOHAN BACKLUND',
+                     'JOHAN HEDBERG',
+                     'JOHAN HOLMQVIST',
+                     'JOHN CURRY',
+                     'JOHN GIBSON',
+                     'JOHN GRAHAME',
+                     'JON GILLIES',
+                     'JONAS GUSTAVSSON',
+                     'JONAS HILLER',
+                     'JONAS JOHANSSON',
+                     'JONATHAN BERNIER',
+                     'JONATHAN QUICK',
+                     'JONI ORTIO',
+                     'JOONAS KORPISALO',
+                     'JORDAN BINNINGTON',
+                     'JOSE THEODORE',
+                     'JOSEF KORENAR',
+                     'JOSEPH WOLL',
+                     'JOSH HARDING',
+                     'JOSH TORDJMAN',
+                     'JUSSI RYNNAS',
+                     'JUSTIN PETERS',
+                     'JUSTIN POGGE',
+                     'JUSTUS ANNUNEN',
+                     'JUUSE SAROS',
+                     'KAAPO KAHKONEN',
+                     'KADEN FULCHER',
+                     'KAREL VEJMELKA',
+                     'KARI LEHTONEN',
+                     'KARRI RAMO',
+                     'KASIMIR KASKISUO',
+                     'KEITH KINKAID',
+                     'KEN APPLEBY',
+                     'KENNETH APPLEBY',
+                     'KENT SIMPSON',
+                     'KEVIN BOYLE',
+                     'KEVIN LANKINEN',
+                     'KEVIN MANDOLESE',
+                     'KEVIN POULIN',
+                     'KEVIN WEEKES',
+                     'KRISTERS GUDLEVSKIS',
+                     'LANDON BOW',
+                     'LAURENT BROSSOIT',
+                     'LEEVI MERILAINEN',
+                     'LELAND IRVING',
+                     'LINUS ULLMARK',
+                     'LOGAN THOMPSON',
+                     'LOUIS DOMINGUE',
+                     'LUKAS DOSTAL',
+                     'MACKENZIE BLACKWOOD',
+                     'MACKENZIE SKAPSKI',
+                     'MADS SOGAARD',
+                     'MAGNUS CHRONA',
+                     'MAGNUS HELLBERG',
+                     'MALCOLM SUBBAN',
+                     'MANNY FERNANDEZ',
+                     'MANNY LEGACE',
+                     'MARC DENIS',
+                     'MARC-ANDRE FLEURY',
+                     'MARCUS HOGBERG',
+                     'MAREK LANGHAMER',
+                     'MAREK MAZANEC',
+                     'MAREK SCHWARZ',
+                     'MARK DEKANICH',
+                     'MARK VISENTIN',
+                     'MARTIN BIRON',
+                     'MARTIN BRODEUR',
+                     'MARTIN GERBER',
+                     'MARTIN JONES',
+                     'MARTY TURCO',
+                     'MATHIEU GARON',
+                     'MATISS KIVLENIEKS',
+                     'MATT CLIMIE',
+                     'MATT HACKETT',
+                     'MATT KEETLEY',
+                     'MATT MURRAY',
+                     'MATT TOMKINS',
+                     'MATT VILLALTA',
+                     'MATT ZABA',
+                     "MATTHEW O'CONNOR",
+                     'MAXIME LAGACE',
+                     'MICHAEL DIPIETRO',
+                     'MICHAEL HOUSER',
+                     'MICHAEL HUTCHINSON',
+                     'MICHAEL LEIGHTON',
+                     'MICHAEL MCNIVEN',
+                     'MICHAL NEUVIRTH',
+                     'MIIKKA KIPRUSOFF',
+                     'MIKAEL TELLQVIST',
+                     'MIKE BRODEUR',
+                     'MIKE CONDON',
+                     'MIKE MCKENNA',
+                     'MIKE MURPHY',
+                     'MIKE SMITH',
+                     'MIKKO KOSKINEN',
+                     'NATHAN LAWSON',
+                     'NATHAN LIEUWEN',
+                     'NICO DAWS',
+                     'NIKITA TOLOPILO',
+                     'NIKKE KOKKO',
+                     'NIKLAS BACKSTROM',
+                     'NIKLAS SVEDBERG',
+                     'NIKLAS TREUTLE',
+                     'NIKOLAI KHABIBULIN',
+                     'OLIE KOLZIG',
+                     'OLIVIER RODRIGUE',
+                     'OLLE ERIKSSON EK',
+                     'ONDREJ PAVELEC',
+                     'OSCAR DANSK',
+                     'PASCAL LECLAIRE',
+                     'PATRICK LALIME',
+                     'PAVEL FRANCOUZ',
+                     'PEKKA RINNE',
+                     'PETER BUDAJ',
+                     'PETER MANNINO',
+                     'PETR MRAZEK',
+                     'PHEONIX COPLEY',
+                     'PHILIPP GRUBAUER',
+                     'PYOTR KOCHETKOV',
+                     'RAY EMERY',
+                     'RETO BERRA',
+                     'RICHARD BACHMAN',
+                     'RICK DIPIETRO',
+                     'RIKU HELENIUS',
+                     'ROB ZEPP',
+                     'ROBERTO LUONGO',
+                     'ROBIN LEHNER',
+                     'ROMAN WILL',
+                     'RYAN MILLER',
+                     'SAM MONTEMBEAULT',
+                     'SAMUEL MONTEMBEAULT',
+                     'SAMI AITTOKALLIO',
+                     'SAMUEL ERSSON',
+                     'SCOTT CLEMMENSEN',
+                     'SCOTT DARLING',
+                     'SCOTT FOSTER',
+                     'SCOTT WEDGEWOOD',
+                     'SEBASTIAN COSSA',
+                     'SEBASTIEN CARON',
+                     'SEMYON VARLAMOV',
+                     'SERGEI BOBROVSKY',
+                     'SPENCER KNIGHT',
+                     'SPENCER MARTIN',
+                     'STEVE MASON',
+                     'STEVE VALIQUETTE',
+                     'STUART SKINNER',
+                     'THATCHER DEMKO',
+                     'THOMAS GREISS',
+                     'THOMAS HODGES',
+                     'TIM THOMAS',
+                     'TIMO PIELMEIER',
+                     'TOBIAS STEPHAN',
+                     'TOM MCCOLLUM',
+                     'TOMAS VOKOUN',
+                     'TRENT MINER',
+                     'TRISTAN JARRY',
+                     'TRISTAN LENNOX',
+                     'TROY GROSENICK',
+                     'TUUKKA RASK',
+                     'TY CONKLIN',
+                     'TYLER BUNZ',
+                     'TYLER WEIMAN',
+                     'UKKO-PEKKA LUUKKONEN',
+                     'VEINI VEHVILAINEN',
+                     'VESA TOSKALA',
+                     'VICTOR OSTMAN',
+                     'VIKTOR FASTH',
+                     'VILLE HUSSO',
+                     'VITEK VANECEK',
+                     'WADE DUBIELEWICZ',
+                     'YANIV PERETS',
+                     'YANN DANIS',
+                     'YAROSLAV ASKAROV',
+                     'ZACH FUCALE',
+                     'ZACH SAWCHENKO',
+                     'ZANE MCINTYRE']
+
     if home_page is None:
         url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TH0' + game_id + '.HTM'
         
@@ -674,10 +1009,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
-    if type(home_page) == str:
-        home_soup = BeautifulSoup(home_page, 'lxml')
-    else:
-        home_soup = BeautifulSoup(home_page.content, 'lxml')
+    home_soup = BeautifulSoup(home_page.content, 'lxml')
     found = home_soup.find_all('td', {'class':['playerHeading + border', 'lborder + bborder']})
     if len(found)==0:
         raise IndexError('This game has no shift data.')
@@ -759,14 +1091,14 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             df = df = pd.DataFrame(np.array((players[key]['shifts'])).reshape(length, 6)).rename(
             columns = {0:'period', 1:'shifts', 2:'avg', 3:'TOI', 4:'EV Total', 5:'PP Total'})
             df = df.assign(name = players[key]['name'],
-                            number = players[key]['number'],
-                            team = thisteam,
-                            venue = "home")
+                          number = players[key]['number'],
+                          team = thisteam,
+                          venue = "home")
             alldf_list.append(df)
             
         home_extra_shifts = pd.concat(alldf_list, ignore_index=True) if alldf_list else pd.DataFrame()
 
-        home_extra_shifts = home_extra_shifts.assign(avg = np.where(home_extra_shifts.avg=='\xa0', '00:00', home_extra_shifts.avg))
+        shifts_needing_to_be_added = home_extra_shifts[home_extra_shifts.shifts=='0']
 
         def subtract_from_twenty_minutes(time_string):
             # Parse the input time string
@@ -786,104 +1118,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             # Format the result
             return f"{result_minutes}:{result_seconds:02d}"
 
-        def convert_clock_to_seconds(clock):
-            min = int(clock.split(':')[0])
-            sec = int(clock.split(':')[1])
-            seconds = min * 60 + sec
-            return seconds
-
-        # Had previously used game clock from the tds. However, as it turns out, the TOIs are actually behind.
-        # The TOIs appear to be processed at the time of the last shift end, rather than the time of the game clock.
-
-        # home_game_clock = home_soup.find_all('td', {'align':'center', 'style':'font-size: 10px;font-weight:bold'})[6].text
-
-        # home_clock_time_now = subtract_from_twenty_minutes(home_game_clock.split('(')[1].split(' ')[0]) 
-
-        # home_clock_period = home_game_clock.split('Period ')[1].split(' ')[0]
-
-        # Extract LIVE clock from header to capture the gap between shift data and live state
-        try:
-            clock_tags = home_soup.find_all('td', {'align':'center', 'style':'font-size: 10px;font-weight:bold'})
-            if len(clock_tags) > 6:
-                header_clock_text = clock_tags[6].text
-                # Format: "Period 3 (04:56 Remaining)"
-                if "Remaining" in header_clock_text:
-                    time_rem = header_clock_text.split('(')[1].split(' ')[0]
-                    # subtract_from_twenty_minutes converts Remaining <-> Elapsed
-                    home_live_clock = subtract_from_twenty_minutes(time_rem)
-                else:
-                     home_live_clock = None
-            else:
-                home_live_clock = None
-        except:
-            home_live_clock = None
-
-        home_clock_time_now = home_shifts.assign(period_secs = home_shifts.shift_end.str.split(' / ').str[0].apply(lambda x: convert_clock_to_seconds(x)))[
-            home_shifts.assign(period_secs = home_shifts.shift_end.str.split(' / ').str[0].apply(lambda x: convert_clock_to_seconds(x))).period==max(home_shifts.period)
-            ].sort_values(by = 'period_secs', ascending = False).head(1).shift_end.str.split(' / ').str[0].item()
-            
-        if home_live_clock:
-             home_shift_end_time = home_live_clock
-        else:
-             home_shift_end_time = home_clock_time_now
-
-        home_clock_period = max(home_shifts.period.astype(int))
-
-        # This could be viewed as: How many seconds ago did their shift start
-        # But the question is: What is the current time, off which the "TOI" is even computed? 
-        # I think we might get that at the very top of the soup...
-
-        home_extra_shifts = home_extra_shifts.assign(avg = np.where(home_extra_shifts.avg=='\xa0', '00:00', home_extra_shifts.avg))
-
-        home_extra_shifts = home_extra_shifts.assign(
-            avg_secs = home_extra_shifts.avg.str.split(':').str[0].astype(int) * 60 + home_extra_shifts.avg.str.split(':').str[1].astype(int),
-            toi_secs = home_extra_shifts.TOI.str.split(':').str[0].astype(int) * 60 + home_extra_shifts.TOI.str.split(':').str[1].astype(int)
-        )
-
-        # Calculate completed TOI from actual shifts to determine if there is a discrepancy
-        completed_toi = home_shifts.assign(
-            duration_secs = home_shifts.duration.apply(lambda x: convert_clock_to_seconds(x))
-        ).groupby(['name', 'period'])['duration_secs'].sum().reset_index().rename(columns={'duration_secs': 'est_toi'})
-
-        # Merge completed TOI into summary
-        home_extra_shifts = home_extra_shifts.merge(completed_toi, on=['name', 'period'], how='left').fillna({'est_toi': 0})
-
-        # Calculate difference between Summary TOI and Completed TOI
-        home_extra_shifts = home_extra_shifts.assign(toi_diff = home_extra_shifts.toi_secs - home_extra_shifts.est_toi)
-
-        shifts_needing_to_be_added = home_extra_shifts[home_extra_shifts.toi_diff > 1]
-
-        start_times_seconds = convert_clock_to_seconds(home_clock_time_now) - (shifts_needing_to_be_added.toi_secs - shifts_needing_to_be_added.est_toi)
-        
-        # Ensure start times are not negative (can happen if clock is stale but TOI is updated)
-        start_times_seconds = np.maximum(0, start_times_seconds)
-
-        import math
-
-        shifts_needing_to_be_added = shifts_needing_to_be_added.assign(
-            shift_start = ((start_times_seconds/60).astype(str).str.split('.').str[0] + 
-                            ':' + 
-                            np.where(
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int) < 10,
-                                '0' + (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str),
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str)
-                            )) + 
-                            ' / ' +
-                            ((start_times_seconds/60).astype(str).str.split('.').str[0] + 
-                            ':' + 
-                            np.where(
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int) < 10,
-                                '0' + (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str),
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str)
-                            )
-                            ).apply(lambda x: subtract_from_twenty_minutes(x)),
-            shift_end = home_shift_end_time + ' / ' + subtract_from_twenty_minutes(home_shift_end_time),
-            duration = shifts_needing_to_be_added.toi_secs - shifts_needing_to_be_added.est_toi
-                            )
-
-        shifts_needing_to_be_added = shifts_needing_to_be_added.assign(
-            duration = '0' + (shifts_needing_to_be_added.duration / 60).astype(str).str.split('.').str[0] + ':' + (('0.' + (shifts_needing_to_be_added.duration / 60).astype(str).str.split('.').str[1]).astype(float) * 60).astype(int).astype(str)
-        )
+        shifts_needing_to_be_added = shifts_needing_to_be_added.assign(shift_start = '0:00 / ' + shifts_needing_to_be_added.TOI,
+                                     shift_end = shifts_needing_to_be_added.TOI +  ' / ' + shifts_needing_to_be_added.TOI.apply(lambda x: subtract_from_twenty_minutes(x)),
+                                     duration = shifts_needing_to_be_added.TOI)
 
         shifts_needing_to_be_added = shifts_needing_to_be_added.merge(
         home_shifts.assign(shift_number = home_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'})
@@ -896,7 +1133,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         shifts_needing_to_be_added['number'] = shifts_needing_to_be_added['number'].astype(int)
 
         home_shifts = pd.concat([home_shifts, shifts_needing_to_be_added]).sort_values(by = ['number', 'period', 'shift_number'])
-
+    
     if away_page is None:
         url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TV0' + game_id + '.HTM'
         
@@ -911,10 +1148,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
-    if type(away_page) == str:
-        away_soup = BeautifulSoup(away_page, 'lxml')
-    else:
-        away_soup = BeautifulSoup(away_page.content, 'lxml')
+    away_soup = BeautifulSoup(away_page.content, 'lxml')
     found = away_soup.find_all('td', {'class':['playerHeading + border', 'lborder + bborder']})
     if len(found)==0:
         raise IndexError('This game has no shift data.')
@@ -991,14 +1225,14 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             df = df = pd.DataFrame(np.array((players[key]['shifts'])).reshape(length, 6)).rename(
             columns = {0:'period', 1:'shifts', 2:'avg', 3:'TOI', 4:'EV Total', 5:'PP Total'})
             df = df.assign(name = players[key]['name'],
-                            number = players[key]['number'],
-                            team = thisteam,
-                            venue = "away")
+                          number = players[key]['number'],
+                          team = thisteam,
+                          venue = "away")
             alldf_list.append(df)
             
         away_extra_shifts = pd.concat(alldf_list, ignore_index=True) if alldf_list else pd.DataFrame()
 
-        away_extra_shifts = away_extra_shifts.assign(avg = np.where(away_extra_shifts.avg=='\xa0', '00:00', away_extra_shifts.avg))
+        shifts_needing_to_be_added = away_extra_shifts[away_extra_shifts.shifts=='0']
 
         def subtract_from_twenty_minutes(time_string):
             # Parse the input time string
@@ -1018,105 +1252,12 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             # Format the result
             return f"{result_minutes}:{result_seconds:02d}"
 
-        def convert_clock_to_seconds(clock):
-            min = int(clock.split(':')[0])
-            sec = int(clock.split(':')[1])
-            seconds = min * 60 + sec
-            return seconds
-
-        # Had previously used game clock from the tds. However, as it turns out, the TOIs are actually behind.
-        # The TOIs appear to be processed at the time of the last shift end, rather than the time of the game clock.
-
-        # away_game_clock = away_soup.find_all('td', {'align':'center', 'style':'font-size: 10px;font-weight:bold'})[6].text
-
-        # away_clock_time_now = subtract_from_twenty_minutes(away_game_clock.split('(')[1].split(' ')[0]) 
-
-        # away_clock_period = away_game_clock.split('Period ')[1].split(' ')[0]
-
-        # Extract LIVE clock from header
-        try:
-            clock_tags = away_soup.find_all('td', {'align':'center', 'style':'font-size: 10px;font-weight:bold'})
-            if len(clock_tags) > 6:
-                header_clock_text = clock_tags[6].text
-                if "Remaining" in header_clock_text:
-                    time_rem = header_clock_text.split('(')[1].split(' ')[0]
-                    away_live_clock = subtract_from_twenty_minutes(time_rem)
-                else:
-                     away_live_clock = None
-            else:
-                away_live_clock = None
-        except:
-            away_live_clock = None
-
-        away_clock_time_now = away_shifts.assign(period_secs = away_shifts.shift_end.str.split(' / ').str[0].apply(lambda x: convert_clock_to_seconds(x)))[
-            away_shifts.assign(period_secs = away_shifts.shift_end.str.split(' / ').str[0].apply(lambda x: convert_clock_to_seconds(x))).period==max(away_shifts.period)
-            ].sort_values(by = 'period_secs', ascending = False).head(1).shift_end.str.split(' / ').str[0].item()
-            
-        if away_live_clock:
-             away_shift_end_time = away_live_clock
-        else:
-             away_shift_end_time = away_clock_time_now
-
-        away_clock_period = max(away_shifts.period.astype(int))
-
-        # This could be viewed as: How many seconds ago did their shift start
-        # But the question is: What is the current time, off which the "TOI" is even computed? 
-        # I think we might get that at the very top of the soup...
-
-        away_extra_shifts = away_extra_shifts.assign(avg = np.where(away_extra_shifts.avg=='\xa0', '00:00', away_extra_shifts.avg))
-
-        away_extra_shifts = away_extra_shifts.assign(
-            avg_secs = away_extra_shifts.avg.str.split(':').str[0].astype(int) * 60 + away_extra_shifts.avg.str.split(':').str[1].astype(int),
-            toi_secs = away_extra_shifts.TOI.str.split(':').str[0].astype(int) * 60 + away_extra_shifts.TOI.str.split(':').str[1].astype(int)
-        )
-
-        # Calculate completed TOI from actual shifts to determine if there is a discrepancy
-        completed_toi = away_shifts.assign(
-            duration_secs = away_shifts.duration.apply(lambda x: convert_clock_to_seconds(x))
-        ).groupby(['name', 'period'])['duration_secs'].sum().reset_index().rename(columns={'duration_secs': 'est_toi'})
-
-        # Merge completed TOI into summary
-        away_extra_shifts = away_extra_shifts.merge(completed_toi, on=['name', 'period'], how='left').fillna({'est_toi': 0})
-
-        # Calculate difference between Summary TOI and Completed TOI
-        away_extra_shifts = away_extra_shifts.assign(toi_diff = away_extra_shifts.toi_secs - away_extra_shifts.est_toi)
-
-        shifts_needing_to_be_added = away_extra_shifts[away_extra_shifts.toi_diff > 1]
-
-        start_times_seconds = convert_clock_to_seconds(away_clock_time_now) - (shifts_needing_to_be_added.toi_secs - shifts_needing_to_be_added.est_toi)
-        
-        # Ensure start times are not negative (can happen if clock is stale but TOI is updated)
-        start_times_seconds = np.maximum(0, start_times_seconds)
-
-        import math
-
-        shifts_needing_to_be_added = shifts_needing_to_be_added.assign(
-            shift_start = ((start_times_seconds/60).astype(str).str.split('.').str[0] + 
-                            ':' + 
-                            np.where(
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int) < 10,
-                                '0' + (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str),
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str)
-                            )) + 
-                            ' / ' +
-                            ((start_times_seconds/60).astype(str).str.split('.').str[0] + 
-                            ':' + 
-                            np.where(
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int) < 10,
-                                '0' + (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str),
-                                (('0.' + (start_times_seconds/60).astype(str).str.split('.').str[-1]).astype(float) * 60).astype(int).astype(str)
-                            )
-                            ).apply(lambda x: subtract_from_twenty_minutes(x)),
-            shift_end = away_shift_end_time + ' / ' + subtract_from_twenty_minutes(away_shift_end_time),
-            duration = shifts_needing_to_be_added.toi_secs - shifts_needing_to_be_added.est_toi
-                            )
-
-        shifts_needing_to_be_added = shifts_needing_to_be_added.assign(
-            duration = '0' + (shifts_needing_to_be_added.duration / 60).astype(str).str.split('.').str[0] + ':' + (('0.' + (shifts_needing_to_be_added.duration / 60).astype(str).str.split('.').str[1]).astype(float) * 60).astype(int).astype(str)
-        )
+        shifts_needing_to_be_added = shifts_needing_to_be_added.assign(shift_start = '0:00 / ' + shifts_needing_to_be_added.TOI.astype(str),
+                                 shift_end = shifts_needing_to_be_added.TOI.astype(str) +  ' / ' + shifts_needing_to_be_added.TOI.apply(lambda x: subtract_from_twenty_minutes(x)),
+                                 duration = shifts_needing_to_be_added.TOI.astype(str))
 
         shifts_needing_to_be_added = shifts_needing_to_be_added.merge(
-        away_shifts.assign(shift_number = away_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'})
+            away_shifts.assign(shift_number = away_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'})
         )
 
         shifts_needing_to_be_added = shifts_needing_to_be_added.assign(shift_number = shifts_needing_to_be_added.prior_max_shift + 1)
@@ -1127,6 +1268,164 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
         away_shifts = pd.concat([away_shifts, shifts_needing_to_be_added]).sort_values(by = ['number', 'period', 'shift_number'])
         
+        # Additional logic to handle period 1 scrape when we don't have goalie shifts yet. 
+        # Initialize goalie DataFrames to avoid NameError if extraction fails
+        home_goalies = pd.DataFrame()
+        away_goalies = pd.DataFrame()
+            
+        if len(home_shifts[(home_shifts.name.isin(goalie_names))]) == 0 or len(away_shifts[(away_shifts.name.isin(goalie_names))]) == 0:
+        
+            try:
+                pbp_html_url = f'https://www.nhl.com/scores/htmlreports/{season}/GS0{game_id}.HTM'
+                print(f'  📊 Fetching goalie TOI from game summary page: GS0{game_id}.HTM')
+                pbp_soup = BeautifulSoup(_session.get(pbp_html_url, timeout=10).content, 'lxml')
+                goalie_header = pbp_soup.find('td', string='GOALTENDER SUMMARY')
+                
+                if goalie_header is None:
+                    # Try alternative search method
+                    goalie_header = pbp_soup.find('td', text='GOALTENDER SUMMARY')
+
+                if goalie_header is not None:
+                    # Navigate to the table containing goalie data
+                    goalie_table = goalie_header.find_next('table')
+                    
+                    if goalie_table is not None:
+                        goalie_tables = pd.read_html(str(goalie_table))
+                        
+                        if len(goalie_tables) > 0:
+                            goalie_df = goalie_tables[0]
+                            
+                            # Extract away team goalies
+                            try:
+                                # Away team is typically in first 2 rows
+                                away_team_rows = goalie_df[:2]
+                                away_team = away_team_rows.iloc[0, 0] if len(away_team_rows) > 0 else None
+                                
+                                # Away goalies are typically in rows 2-4
+                                away_goalie_rows = goalie_df[2:4]
+                                # Filter out rows where first column is NaN
+                                away_goalie_rows = away_goalie_rows[~pd.isna(away_goalie_rows.iloc[:, 0])]
+                                
+                                # Filter for rows that have TOI data (check column 6 for TOT, or column 3)
+                                # Try column 6 first (TOT column), then fall back to column 3
+                                if len(away_goalie_rows) > 0 and len(away_goalie_rows.columns) > 6:
+                                    away_goalie_rows = away_goalie_rows[~pd.isna(away_goalie_rows.iloc[:, 6])]
+                                elif len(away_goalie_rows) > 0 and len(away_goalie_rows.columns) > 3:
+                                    away_goalie_rows = away_goalie_rows[~pd.isna(away_goalie_rows.iloc[:, 3])]
+                                
+                                if len(away_goalie_rows) > 0:
+                                    # Use column 6 for TOI if available and has data, otherwise column 3
+                                    if len(away_goalie_rows.columns) > 6 and not away_goalie_rows.iloc[:, 6].isna().all():
+                                        toi_col = 6
+                                    elif len(away_goalie_rows.columns) > 3:
+                                        toi_col = 3
+                                    else:
+                                        toi_col = None
+                                    
+                                    if toi_col is not None:
+                                        away_goalies = away_goalie_rows.assign(team=away_team).rename(
+                                            columns={0: 'number', 2: 'name', toi_col: 'TOI'}
+                                        ).loc[:, ['number', 'name', 'TOI', 'team']]
+                                    else:
+                                        away_goalies = pd.DataFrame()
+                                    
+                                    # Filter out TEAM TOTALS and rows where TOI is 'TOT' or invalid
+                                    away_goalies = away_goalies[
+                                        (away_goalies.TOI != 'TOT') & 
+                                        (~pd.isna(away_goalies.TOI)) &
+                                        (away_goalies.name != 'TEAM TOTALS')
+                                    ]
+                                    if len(away_goalies) > 0:
+                                        print(f'  ✅ Extracted {len(away_goalies)} away goalie(s) from GS0')
+                            except Exception as e:
+                                print(f'  ⚠️ Error extracting away goalies from GS0: {e}')
+                                away_goalies = pd.DataFrame()
+                            
+                            # Extract home team goalies
+                            try:
+                                # Home team is typically in rows 6-8
+                                home_team_rows = goalie_df[6:8]
+                                home_team_rows = home_team_rows[~pd.isna(home_team_rows.iloc[:, 0])]
+                                home_team = home_team_rows.iloc[0, 0] if len(home_team_rows) > 0 else None
+                                
+                                # Home goalies are typically in rows 8-10
+                                home_goalie_rows = goalie_df[8:10]
+                                # Filter out rows where first column is NaN
+                                home_goalie_rows = home_goalie_rows[~pd.isna(home_goalie_rows.iloc[:, 0])]
+                                
+                                # Filter for rows that have TOI data
+                                if len(home_goalie_rows) > 0 and len(home_goalie_rows.columns) > 6:
+                                    home_goalie_rows = home_goalie_rows[~pd.isna(home_goalie_rows.iloc[:, 6])]
+                                elif len(home_goalie_rows) > 0 and len(home_goalie_rows.columns) > 3:
+                                    home_goalie_rows = home_goalie_rows[~pd.isna(home_goalie_rows.iloc[:, 3])]
+                                
+                                if len(home_goalie_rows) > 0:
+                                    # Use column 6 for TOI if available and has data, otherwise column 3
+                                    if len(home_goalie_rows.columns) > 6 and not home_goalie_rows.iloc[:, 6].isna().all():
+                                        toi_col = 6
+                                    elif len(home_goalie_rows.columns) > 3:
+                                        toi_col = 3
+                                    else:
+                                        toi_col = None
+                                    
+                                    if toi_col is not None:
+                                        home_goalies = home_goalie_rows.assign(team=home_team).rename(
+                                            columns={0: 'number', 2: 'name', toi_col: 'TOI'}
+                                        ).loc[:, ['number', 'name', 'TOI', 'team']]
+                                    else:
+                                        home_goalies = pd.DataFrame()
+                                    
+                                    # Filter out TEAM TOTALS and rows where TOI is 'TOT' or invalid
+                                    home_goalies = home_goalies[
+                                        (home_goalies.TOI != 'TOT') & 
+                                        (~pd.isna(home_goalies.TOI)) &
+                                        (home_goalies.name != 'TEAM TOTALS')
+                                    ]
+                                    if len(home_goalies) > 0:
+                                        print(f'  ✅ Extracted {len(home_goalies)} home goalie(s) from GS0')
+                            except Exception as e:
+                                print(f'  ⚠️ Error extracting home goalies from GS0: {e}')
+                                home_goalies = pd.DataFrame()
+            except Exception as e:
+                print(f'Error fetching goalie data from GS0 page: {e}')
+                home_goalies = pd.DataFrame()
+                away_goalies = pd.DataFrame()
+
+        # Add goalie shifts if they're missing and we successfully extracted goalie data
+        if len(home_shifts[(home_shifts.name.isin(goalie_names))]) == 0 and len(home_goalies) > 0:
+
+            home_goalie_shift = home_goalies.assign(shift_number = 1, 
+                                period = 1,
+                                name = home_goalies.name.str.split(', ').str[1] + ' ' + home_goalies.name.str.split(', ').str[0],
+                               shift_start = '0:00 / 20:00',
+                               shift_end = home_goalies.TOI + ' / ' + home_goalies.TOI.apply(lambda x: subtract_from_twenty_minutes(x)),
+                               duration = home_goalies.TOI,
+                               venue = 'home').loc[
+            :, ['shift_number', 'period', 'shift_start', 'shift_end', 'duration', 'name', 'number', 'team', 'venue']]
+
+            home_goalie_shift = home_goalie_shift.assign(period = home_goalie_shift.period.astype(int),
+                                shift_number = home_goalie_shift.shift_number.astype(int),
+                                number = home_goalie_shift.number.astype(int))
+
+            home_shifts = pd.concat([home_shifts, home_goalie_shift]).sort_values(by = ['number', 'period', 'shift_number'])
+
+        if len(away_shifts[(away_shifts.name.isin(goalie_names))]) == 0 and len(away_goalies) > 0:
+
+            away_goalie_shift = away_goalies.assign(shift_number = 1, 
+                                period = 1,
+                                name = away_goalies.name.str.split(', ').str[1] + ' ' + away_goalies.name.str.split(', ').str[0],
+                               shift_start = '0:00 / 20:00',
+                               shift_end = away_goalies.TOI + ' / ' + away_goalies.TOI.apply(lambda x: subtract_from_twenty_minutes(x)),
+                               duration = away_goalies.TOI,
+                               venue = 'away').loc[
+            :, ['shift_number', 'period', 'shift_start', 'shift_end', 'duration', 'name', 'number', 'team', 'venue']]
+
+            away_goalie_shift = away_goalie_shift.assign(period = away_goalie_shift.period.astype(int),
+                                shift_number = away_goalie_shift.shift_number.astype(int),
+                                number = away_goalie_shift.number.astype(int))
+
+            away_shifts = pd.concat([away_shifts, away_goalie_shift]).sort_values(by = ['number', 'period', 'shift_number'])
+
     global all_shifts
     
     all_shifts = pd.concat([home_shifts, away_shifts])
@@ -1227,8 +1526,6 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     except Exception as e:
         print(f'Error cleaning time values: {e}')
         print('Stupid vibe coded system is causing problems')
-
-    goalie_names = roster_cache[roster_cache.Pos=='G'].Name.tolist()
     
     all_shifts = all_shifts.assign(end_time = np.where(pd.to_datetime(all_shifts.start_time).dt.time > pd.to_datetime(all_shifts.end_time).dt.time, '20:00', all_shifts.end_time),
                                   goalie = np.where(all_shifts.name.isin(goalie_names), 1, 0))
@@ -1302,8 +1599,6 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     full_changes = full_changes.assign(team = np.where(full_changes.team=='CANADIENS MONTREAL', 'MONTREAL CANADIENS', full_changes.team))
 
     full_changes = full_changes.assign(team = np.where(full_changes.team=='MONTRÉAL CANADIENS', 'MONTREAL CANADIENS', full_changes.team))
-
-    full_changes.team = np.where(full_changes.team=='MONTRÃAL CANADIENS', 'MONTREAL CANADIENS', full_changes.team)
         
     return full_changes.reset_index(drop = True)#.drop(columns = ['time', 'period_seconds']) 
 
@@ -1341,10 +1636,7 @@ def scrape_html_events(season, game_id, events_page=None, roster_page=None):
     # TIME: Parsing
     parse_start = time.time()
     # OPTIMIZED: Use lxml directly instead of BeautifulSoup for faster parsing
-    if type(events_page) == str:
-        doc = html.fromstring(events_page)
-    else:
-        doc = html.fromstring(events_page.content.decode('ISO-8859-1'))
+    doc = html.fromstring(events_page.content.decode('ISO-8859-1'))
     # XPath to find td elements with class containing 'bborder'
     tds = doc.xpath("//td[contains(@class, 'bborder')]")
     #global stripped_html
@@ -2437,7 +2729,7 @@ def _fetch_all_pages_parallel(season, game_id):
     
     return results
 
-def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False):
+def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
     
     global single
     global event_coords
@@ -2447,9 +2739,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
     
     # OPTIMIZED: Use list instead of DataFrame for accumulating results
     full_list = []
-    
-    # Store intermediate dataframes for each game if return_intermediates is True
-    intermediates_list = []
     
     i = 0
     
@@ -2473,22 +2762,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                 print(f'⏱️ Parallel fetch took: {parallel_duration:.2f}s')
             except Exception:
                 pass
-            
-            # Initialize intermediate dict for this game if return_intermediates is True
-            game_intermediates = {'game_id': game_id} if return_intermediates else None
-            
-            # Store raw HTML content if requested
-            if return_intermediates:
-                try:
-                    game_intermediates['raw_html'] = {
-                        'events': pages['events'].content.decode('ISO-8859-1', errors='ignore'),
-                        'roster': pages['roster'].content.decode('ISO-8859-1', errors='ignore'),
-                        'home_shifts': pages['home_shifts'].content.decode('ISO-8859-1', errors='ignore'),
-                        'away_shifts': pages['away_shifts'].content.decode('ISO-8859-1', errors='ignore')
-                    }
-                except Exception as e:
-                    print(f'  ⚠️ Warning: Could not store raw HTML: {e}')
-                    game_intermediates['raw_html'] = {}
             
             # TIME: HTML Events (using pre-fetched pages)
             html_start = time.time()
@@ -2523,12 +2796,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     raise ExpatError('Bad takes, dude!')
                 event_coords['game_id'] = int(game_id)
                 
-                # Store intermediates if requested
-                if return_intermediates:
-                    game_intermediates['html_events'] = single.copy()
-                    game_intermediates['roster'] = roster_cache.copy()
-                    game_intermediates['api_coords'] = event_coords.copy()
-                
                 # TIME: Merge Events
                 merge_start = time.time()
                 print('Attempting to merge events')
@@ -2539,10 +2806,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     print(f'⏱️ Merge took: {merge_duration:.2f}s')
                 except Exception:
                     pass
-                
-                # Store merged events before fix_missing if requested
-                if return_intermediates:
-                    game_intermediates['events_before_fix'] = events.copy()
                 
                 # TIME: Fix Missing
                 try:
@@ -2557,33 +2820,17 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     print('Issue when fixing problematic events. Here it is: ' + str(e))
                     continue
                 
-                # Store events after fix_missing if requested
-                if return_intermediates:
-                    game_intermediates['events_after_fix'] = events.copy()
-                
                 # TIME: Shifts and Finalize (using pre-fetched pages)
                 try:
                     shifts_start = time.time()
-                    # Prepare store_html dict if requested
-                    if return_intermediates and 'raw_html' in game_intermediates:
-                        store_html_dict = game_intermediates['raw_html']
-                    else:
-                        store_html_dict = None
                     shifts = scrape_html_shifts(season, small_id, live, 
                                                 home_page=pages['home_shifts'],
-                                                away_page=pages['away_shifts'],
-                                                store_html=store_html_dict,
-                                                roster_cache = roster_cache)
-
+                                                away_page=pages['away_shifts'])
                     shifts_duration = time.time() - shifts_start
                     try:
                         print(f'⏱️ HTML shifts processing took: {shifts_duration:.2f}s')
                     except Exception:
                         pass
-                    
-                    # Store shifts if requested
-                    if return_intermediates:
-                        game_intermediates['shifts'] = shifts.copy()
                     
                     prepare_start = time.time()
                     finalized = merge_and_prepare(events, shifts, roster_cache)
@@ -2592,12 +2839,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         print(f'⏱️ Merge and prepare took: {prepare_duration:.2f}s')
                     except Exception:
                         pass
-                    
-                    # Store finalized if requested
-                    if return_intermediates:
-                        game_intermediates['finalized'] = finalized.copy()
-                        game_intermediates['coordinate_source'] = 'api'
-                        intermediates_list.append(game_intermediates)
                     
                     full_list.append(finalized)
                     second_time = time.time()
@@ -2611,14 +2852,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     ).drop(
                     columns = ['original_time', 'other_team', 'strength', 'event_player_str', 'version', 'hometeamfull', 'awayteamfull']
                     ).assign(game_warning = 'NO SHIFT DATA.')
-                    
-                    # Store intermediates for no-shift-data case if requested
-                    if return_intermediates:
-                        game_intermediates['finalized'] = fixed_events.copy()
-                        game_intermediates['coordinate_source'] = 'api'
-                        game_intermediates['warning'] = 'NO SHIFT DATA'
-                        intermediates_list.append(game_intermediates)
-                    
                     full_list.append(fixed_events)
                     second_time = time.time()
                 
@@ -2682,73 +2915,22 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         event_coords = scrape_espn_events(int(espn_id))
                         print('Scraped ESPN Events, we have this many rows:', len(event_coords))
                         event_coords['coordinate_source'] = 'espn'
-                        
-                        # Store intermediates for ESPN path if requested
-                        if return_intermediates:
-                            if game_intermediates is None:
-                                game_intermediates = {'game_id': game_id}
-                            game_intermediates['html_events'] = single.copy()
-                            game_intermediates['roster'] = roster_cache.copy()
-                            game_intermediates['espn_coords'] = event_coords.copy()
-                        
                         print('Attempting to merge events')
                         events = single.merge(event_coords, on = ['event_player_1', 'game_seconds', 'period', 'version', 'event'], how = 'left').drop(columns = ['espn_id'])
                         print('Merged events, we have this many rows:', len(events))
-                        
-                        # Store merged events before fix_missing if requested
-                        if return_intermediates:
-                            game_intermediates['events_before_fix'] = events.copy()
                         try:
                             events = fix_missing(single, event_coords, events)
-                            # Store events after fix_missing if requested
-                            if return_intermediates:
-                                game_intermediates['events_after_fix'] = events.copy()
                         except IndexError as e:
                             print('Issue when fixing problematic events. Here it is: ' + str(e))
                             continue
                     except IndexError:
                         print('This game does not have ESPN or API coordinates. You will get it anyway, though.')
                         events = single
-                        # Store intermediates for no-coords case if requested
-                        if return_intermediates:
-                            if game_intermediates is None:
-                                game_intermediates = {'game_id': game_id}
-                            game_intermediates['html_events'] = single.copy()
-                            game_intermediates['roster'] = roster_cache.copy()
-                            game_intermediates['events_after_fix'] = events.copy()
-                            game_intermediates['coordinate_source'] = 'none'
                     try:
-                        # Prepare store_html dict if requested
-                        if return_intermediates:
-                            if game_intermediates is None:
-                                game_intermediates = {'game_id': game_id}
-                            if 'raw_html' not in game_intermediates:
-                                game_intermediates['raw_html'] = {}
-                            store_html_dict = game_intermediates['raw_html']
-                        else:
-                            store_html_dict = None
-                        
                         shifts = scrape_html_shifts(season, small_id, live,
                                                     home_page=pages['home_shifts'],
-                                                    away_page=pages['away_shifts'],
-                                                    store_html=store_html_dict,
-                                                    roster_cache = roster_cache)
-                        
-                        # Store shifts if requested
-                        if return_intermediates:
-                            game_intermediates['shifts'] = shifts.copy()
-                        
+                                                    away_page=pages['away_shifts'])
                         finalized = merge_and_prepare(events, shifts, roster_cache)
-                        
-                        # Store finalized if requested
-                        if return_intermediates:
-                            if game_intermediates is None:
-                                game_intermediates = {'game_id': game_id}
-                            if 'coordinate_source' not in game_intermediates:
-                                game_intermediates['coordinate_source'] = 'espn'
-                            game_intermediates['finalized'] = finalized.copy()
-                            intermediates_list.append(game_intermediates)
-                        
                         full_list.append(finalized)
                         second_time = time.time()
                     except IndexError as e:
@@ -2762,16 +2944,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         columns = ['original_time', 'other_team', 'strength', 'event_player_str', 'version', 'hometeamfull', 'awayteamfull']
                         ).assign(game_warning = 'NO SHIFT DATA', season = season)
                         fixed_events['coordinate_source'] = 'espn'
-                        
-                        # Store intermediates for no-shift-data case if requested
-                        if return_intermediates:
-                            if game_intermediates is None:
-                                game_intermediates = {'game_id': game_id}
-                            game_intermediates['finalized'] = fixed_events.copy()
-                            game_intermediates['coordinate_source'] = 'espn'
-                            game_intermediates['warning'] = 'NO SHIFT DATA'
-                            intermediates_list.append(game_intermediates)
-                        
                         full_list.append(fixed_events)
                     second_time = time.time()
                     # Fix this so it doesn't say sourced from ESPN if no coords.
@@ -2851,22 +3023,9 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             events = single
                             events['coordinate_source'] = 'none'
                     try:
-                        # Prepare store_html dict if requested
-                        if return_intermediates:
-                            if game_intermediates is None:
-                                game_intermediates = {'game_id': game_id}
-                            if 'raw_html' not in game_intermediates:
-                                game_intermediates['raw_html'] = {}
-                            store_html_dict = game_intermediates['raw_html']
-                        else:
-                            store_html_dict = None
-                        
                         shifts = scrape_html_shifts(season, small_id, live,
                                                     home_page=pages['home_shifts'],
-                                                    away_page=pages['away_shifts'],
-                                                    store_html=store_html_dict,
-                                                    roster_cache = roster_cache)
-                                                    
+                                                    away_page=pages['away_shifts'])
                         finalized = merge_and_prepare(events, shifts, roster_cache)
                         full_list.append(finalized)
                         second_time = time.time()
@@ -2988,12 +3147,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                 
             # OPTIMIZED: Concat list to DataFrame before return
             full = pd.concat(full_list, ignore_index=True) if full_list else pd.DataFrame()
-            
-            # Return intermediates if requested, otherwise just return the final dataframe
-            if return_intermediates:
-                return {'final': full, 'intermediates': intermediates_list}
-            else:
-                return full
+            return full
     
     # OPTIMIZED: Concat list to DataFrame before final processing
     full = pd.concat(full_list, ignore_index=True) if full_list else pd.DataFrame()
@@ -3046,26 +3200,14 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
 
             full = full[full.index <= full[full.game_strength_state.isin(all_strength_states)].index.max()] 
 
-    # Return intermediates if requested, otherwise just return the final dataframe
-    if return_intermediates:
-        return {'final': full, 'intermediates': intermediates_list}
-    else:
-        return full
+    return full
 
-def full_scrape(game_id_list, live = True, shift = False, return_intermediates = False):
+def full_scrape(game_id_list, live = True, shift = False):
     
     global hidden_patrick
     hidden_patrick = 0
     
-    result = full_scrape_1by1(game_id_list, live, shift_to_espn = shift, return_intermediates = return_intermediates)
-    
-    # Handle return value - could be dict with intermediates or just dataframe
-    if return_intermediates:
-        df = result['final']
-        intermediates_list = result['intermediates']
-    else:
-        df = result
-    
+    df = full_scrape_1by1(game_id_list, live, shift_to_espn = shift)
     print('Full scrape complete, we have this many rows:', len(df))
 
     try:
@@ -3111,28 +3253,14 @@ def full_scrape(game_id_list, live = True, shift = False, return_intermediates =
         if len(missing)>0:
             print('You missed the following games: ' + str(missing))
             print('Let us try scraping each of them one more time.')
-            retry_result = full_scrape_1by1(missing, live, shift_to_espn=shift, return_intermediates=return_intermediates)
-            
-            if return_intermediates:
-                retry_df = retry_result['final']
-                retry_intermediates = retry_result['intermediates']
-                df = pd.concat([df, retry_df], ignore_index=True)
-                intermediates_list.extend(retry_intermediates)
-                return {'final': df, 'intermediates': intermediates_list}
-            else:
-                df = pd.concat([df, retry_result], ignore_index=True)
-                return df
-        else:
-            if return_intermediates:
-                return {'final': df, 'intermediates': intermediates_list}
-            else:
-                return df
-    
-    else:
-        if return_intermediates:
-            return {'final': df, 'intermediates': intermediates_list}
+            retry = full_scrape_1by1(missing)
+            df = pd.concat([df, retry], ignore_index=True)
+            return df
         else:
             return df
+    
+    else:
+        return df
 
 print("Welcome to the TopDownHockey NHL Scraper, built by Patrick Bacon.")
 print("If you enjoy the scraper and would like to support my work, or you have any comments, questions, or concerns, feel free to follow me on Twitter @TopDownHockey or reach out to me via email at patrick.s.bacon@gmail.com. Have fun!")

@@ -4,8 +4,6 @@ This module implements scrape_api_events() using the NHL API play-by-play endpoi
 to replace ESPN scraping functionality.
 """
 
-print('updated nhl api events')
-
 import numpy as np
 import pandas as pd
 import requests
@@ -357,6 +355,7 @@ def _normalize_player_name(name):
         'STEVE KAMPFER': 'STEVEN KAMPFER',
         'JEFFREY TRUCHON-VIEL': 'JEFFREY VIEL',
         'ZACHARY JONES': 'ZAC JONES',
+        'MITCH MARNER': 'MITCHELL MARNER',
         'MATHEW DUMBA': 'MATT DUMBA',
         'JOSHUA MORRISSEY': 'JOSH MORRISSEY',
         'P K SUBBAN': 'P.K. SUBBAN',
@@ -466,7 +465,6 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
         parse_start = time.time()
         api_data = json.loads(response.content)
         player_mapping_df = pd.DataFrame(api_data['rosterSpots'])
-
         player_mapping_df = player_mapping_df.assign(player = (player_mapping_df['firstName'].apply(lambda x: x['default']) + ' ' + player_mapping_df['lastName'].apply(lambda x: x['default'])).str.upper(),
                       link = 'https://assets.nhle.com/mugs/nhl/latest/' + player_mapping_df['playerId'].astype(str) + '.png',
                       id = player_mapping_df['playerId']).loc[:, ['player', 'link', 'id']]
@@ -580,6 +578,12 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
     # ESPN filters: events must have coords AND player names
     events_df = events_df[events_df['event_player_1'].notna()]
     
+    # Normalize player names
+    events_df['event_player_1'] = events_df['event_player_1'].apply(_normalize_player_name)
+    
+    # Filter again after normalization (in case normalization resulted in empty strings)
+    events_df = events_df[events_df['event_player_1'] != '']
+    
     # Calculate priority for sorting (matching ESPN function)
     events_df['priority'] = np.where(
         events_df['event'].isin(['TAKE', 'GIVE', 'MISS', 'HIT', 'SHOT', 'BLOCK']), 1,
@@ -638,14 +642,6 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
         final_columns.append('description')
     
     events_df = events_df[final_columns]
-    
-    # Normalize player names
-    events_df['event_player_1'] = events_df['event_player_1'].apply(lambda x: _normalize_player_name(x))
-
-    events_df = events_df.assign(event_player_1 = events_df.event_player_1.apply(lambda x: _normalize_player_name(x)))
-    
-    # Filter again after normalization (in case normalization resulted in empty strings)
-    events_df = events_df[events_df['event_player_1'] != '']
     
     return events_df
 
