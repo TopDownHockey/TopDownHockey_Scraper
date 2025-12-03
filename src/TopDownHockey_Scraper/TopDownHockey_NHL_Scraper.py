@@ -537,6 +537,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             
         home_extra_shifts = pd.concat(alldf_list, ignore_index=True) if alldf_list else pd.DataFrame()
 
+        if len(home_shifts[home_shifts.name.isin(goalie_names)]) == 0 and len(home_extra_shifts[home_extra_shifts.name.isin(goalie_names)]) == 0:
+            raise IndexError('This game has no shift data')
+
         home_extra_shifts = home_extra_shifts.assign(TOI_seconds_summary = home_extra_shifts.TOI.apply(lambda x: convert_clock_to_seconds(x)))
 
         home_extra_shifts = home_extra_shifts.merge(
@@ -599,6 +602,10 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             home_shifts = pd.concat([home_shifts, shifts_needing_to_be_added]).sort_values(by = ['number', 'period', 'shift_number'])
     
+        elif len(shifts_needing_to_be_added) == 0:
+            home_clock_period = None
+            home_clock_time_now = None
+
     if away_page is None:
         url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TV0' + game_id + '.HTM'
         
@@ -705,6 +712,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             
         away_extra_shifts = pd.concat(alldf_list, ignore_index=True) if alldf_list else pd.DataFrame()
 
+        if len(away_shifts[away_shifts.name.isin(goalie_names)]) == 0 and len(away_extra_shifts[away_extra_shifts.name.isin(goalie_names)]) == 0:
+            raise IndexError('This game has no shift data')
+
         away_extra_shifts = away_extra_shifts.assign(TOI_seconds_summary = away_extra_shifts.TOI.apply(lambda x: convert_clock_to_seconds(x)))
 
         away_extra_shifts = away_extra_shifts.merge(
@@ -766,6 +776,10 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             shifts_needing_to_be_added['number'] = shifts_needing_to_be_added['number'].astype(int)
 
             away_shifts = pd.concat([away_shifts, shifts_needing_to_be_added]).sort_values(by = ['number', 'period', 'shift_number'])
+
+        elif len(shifts_needing_to_be_added) == 0:
+            away_clock_period = None
+            away_clock_time_now = None
 
         home_shifts = home_shifts.assign(
             shift_end = np.where(
@@ -997,13 +1011,36 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     
     full_changes['period_seconds'] = full_changes.time.str.split(':').str[0].astype(int) * 60 + full_changes.time.str.split(':').str[1].astype(int)
 
-    full_changes['game_seconds'] = (np.where((full_changes.period<5) & int(game_id[0])!=3, 
+    full_changes['game_seconds'] = (np.where((full_changes.period<5) & int(game_id)!=3, 
                                    (((full_changes.period - 1) * 1200) + full_changes.period_seconds),
                           3900))
     
-    full_changes = full_changes.assign(team = np.where(full_changes.team.str.contains('CANADI'), 'MONTREAL CANADIENS', full_changes.team))
+    full_changes = full_changes.assign(team = np.where(full_changes.team.str.contains('CANADI'), 'MONTREAL CANADIENS', full_changes.team)).sort_values(by = 'game_seconds')
+
+    if live == True:
+
+        if home_clock_period is not None and away_clock_period is not None:
+            
+            min_game_clock = ((min([home_clock_period, away_clock_period]) - 1) * 1200) + min([convert_clock_to_seconds(home_clock_time_now), convert_clock_to_seconds(away_clock_time_now)])
+
+        elif home_clock_period is not None and away_clock_period is None:
+
+            min_game_clock = ((min([home_clock_period]) - 1) * 1200) + min([convert_clock_to_seconds(home_clock_time_now)])
+
+        elif away_clock_period is not None and home_clock_period is None:
+
+            min_game_clock = ((min([away_clock_period]) - 1) * 1200) + min([convert_clock_to_seconds(away_clock_time_now)])
         
-    return full_changes.reset_index(drop = True)#.drop(columns = ['time', 'period_seconds']) 
+        else:
+            min_game_clock = None
+
+        if min_game_clock is not None:
+
+            full_changes = full_changes[full_changes.game_seconds <= min_game_clock]
+
+        return min_game_clock, full_changes.reset_index(drop = True)
+
+    return full_changes.reset_index(drop = True)
 
 def scrape_html_events(season, game_id, events_page=None, roster_page=None):
     """
@@ -2229,10 +2266,16 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                 # TIME: Shifts and Finalize (using pre-fetched pages)
                 try:
                     shifts_start = time.time()
-                    shifts = scrape_html_shifts(season, small_id, live, 
-                                                home_page=pages['home_shifts'],
-                                                away_page=pages['away_shifts'],
-                                                roster_cache = roster_cache)
+                    if live == True:
+                        min_game_clock, shifts = scrape_html_shifts(season, small_id, live, 
+                                                    home_page=pages['home_shifts'],
+                                                    away_page=pages['away_shifts'],
+                                                    roster_cache = roster_cache)
+                    else:
+                        shifts = scrape_html_shifts(season, small_id, live, 
+                                                    home_page=pages['home_shifts'],
+                                                    away_page=pages['away_shifts'],
+                                                    roster_cache = roster_cache)
                     shifts_duration = time.time() - shifts_start
                     try:
                         print(f'⏱️ HTML shifts processing took: {shifts_duration:.2f}s')
@@ -2241,6 +2284,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                     
                     prepare_start = time.time()
                     finalized = merge_and_prepare(events, shifts, roster_cache)
+                    if live == True:
+                        finalized = finalized[finalized.game_seconds <= min_game_clock]
                     prepare_duration = time.time() - prepare_start
                     try:
                         print(f'⏱️ Merge and prepare took: {prepare_duration:.2f}s')
@@ -2601,9 +2646,26 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
         if live == True and 'game_strength_state' in full.columns:
 
             # Find the point in time where everybody jumps off (i.e., the synthetic shifts end) and get rid of that and everything after. 
+            # (IF we have such a time)
 
-            full = full[full.event_index <= 
-                full[(full.game_strength_state.str.contains('E')) & ((full.game_strength_state != 'EvE')) & (full.game_strength_state.shift(-1) == 'EvE')].event_index.iloc[-1] - 1]
+            if len(
+                full[(full.game_strength_state.str.contains('E')) & 
+                    ((full.game_strength_state != 'EvE')) & 
+                    (full.game_strength_state.shift(-1) == 'EvE') & 
+                    (full.game_period == max(full.game_period))]) > 0:
+
+                full = full[full.event_index <= 
+                    full[(full.game_strength_state.str.contains('E')) & 
+                        ((full.game_strength_state != 'EvE')) & 
+                        (full.game_strength_state.shift(-1) == 'EvE') & 
+                        (full.game_period == max(full.game_period))].event_index.iloc[-1] - 1]
+
+            # If we don't have such a point in time (which can happen when home clock and away clock are misaligned, for example):
+            # Then we find the final change and ditch everything beneath it
+
+            elif full[full.event_type=='CHANGE'].iloc[-1].game_strength_state in ['5vE', 'Ev5']:
+
+                full = full[full.event_index <= full[full.event_type=='CHANGE'].iloc[-1].event_index]
 
     return full
 
