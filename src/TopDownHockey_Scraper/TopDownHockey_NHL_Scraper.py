@@ -600,7 +600,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             home_shifts = pd.concat([home_shifts, shifts_needing_to_be_added]).sort_values(by = ['number', 'period', 'shift_number'])
     
     if away_page is None:
-        url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TH0' + game_id + '.HTM'
+        url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TV0' + game_id + '.HTM'
         
         # TIME: away shifts network request
         net_start = time.time()
