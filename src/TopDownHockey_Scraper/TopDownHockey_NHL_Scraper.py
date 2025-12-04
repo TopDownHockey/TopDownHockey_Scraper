@@ -561,17 +561,21 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             if line == '25 PETTERSSON, ELIAS':
                 line = '25 PETTERSSON(D), ELIAS'
             if ', ' in line:
-                name = line.split(',')
-                number = name[0].split(' ')[0].strip()
-                last_name =  name[0].split(' ')[1].strip()
-                first_name = name[1].strip()
-                full_name = first_name + " " + last_name
-                players[full_name] = dict()
-                players[full_name]['number'] = number
-                players[full_name]['name'] = full_name
-                players[full_name]['shifts'] = []
+                # OPTIMIZED: Split once and reuse
+                name_parts = line.split(',')
+                if len(name_parts) >= 2:
+                    number_last = name_parts[0].split(' ', 1)  # Split only once
+                    number = number_last[0].strip()
+                    last_name = number_last[1].strip() if len(number_last) > 1 else ''
+                    first_name = name_parts[1].strip()
+                    full_name = first_name + " " + last_name
+                    players[full_name] = {
+                        'number': number,
+                        'name': full_name,
+                        'shifts': []
+                    }
             else:
-                players[full_name]['shifts'].extend([line])
+                players[full_name]['shifts'].append(line)  # Use append instead of extend([line])
 
         # OPTIMIZED: Use list + concat instead of repeated _append()
         alldf_list = []
@@ -763,17 +767,21 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             if line == '25 PETTERSSON, ELIAS':
                 line = '25 PETTERSSON(D), ELIAS'
             if ', ' in line:
-                name = line.split(',')
-                number = name[0].split(' ')[0].strip()
-                last_name =  name[0].split(' ')[1].strip()
-                first_name = name[1].strip()
-                full_name = first_name + " " + last_name
-                players[full_name] = dict()
-                players[full_name]['number'] = number
-                players[full_name]['name'] = full_name
-                players[full_name]['shifts'] = []
+                # OPTIMIZED: Split once and reuse
+                name_parts = line.split(',')
+                if len(name_parts) >= 2:
+                    number_last = name_parts[0].split(' ', 1)  # Split only once
+                    number = number_last[0].strip()
+                    last_name = number_last[1].strip() if len(number_last) > 1 else ''
+                    first_name = name_parts[1].strip()
+                    full_name = first_name + " " + last_name
+                    players[full_name] = {
+                        'number': number,
+                        'name': full_name,
+                        'shifts': []
+                    }
             else:
-                players[full_name]['shifts'].extend([line])
+                players[full_name]['shifts'].append(line)  # Use append instead of extend([line])
 
         # OPTIMIZED: Use list + concat instead of repeated _append()
         alldf_list = []
@@ -2278,7 +2286,7 @@ def _fetch_all_pages_parallel(season, game_id):
     
     return results
 
-def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
+def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False):
     
     global single
     global event_coords
@@ -2288,6 +2296,9 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
     
     # OPTIMIZED: Use list instead of DataFrame for accumulating results
     full_list = []
+    
+    # Track intermediates for each game if requested
+    intermediates_list = []
     
     i = 0
     
@@ -2397,7 +2408,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                     prepare_start = time.time()
                     finalized = merge_and_prepare(events, shifts, roster_cache)
                     if live == True:
-                        finalized = finalized[finalized.game_seconds <= min_game_clock]
+                        if min_game_clock is not None:
+                            finalized = finalized[finalized.game_seconds <= min_game_clock]
                     prepare_duration = time.time() - prepare_start
                     try:
                         print(f'⏱️ Merge and prepare took: {prepare_duration:.2f}s')
@@ -2406,6 +2418,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                     
                     full_list.append(finalized)
                     second_time = time.time()
+                    
+                    # Track intermediates if requested
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': shifts.copy() if shifts is not None else None,
+                            'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'coordinate_source': 'api',
+                            'warning': None,
+                            'error': None,
+                            'raw_html': {
+                                'events': pages.get('events'),
+                                'roster': pages.get('roster'),
+                                'home_shifts': pages.get('home_shifts'),
+                                'away_shifts': pages.get('away_shifts'),
+                                'summary': pages.get('summary')
+                            }
+                        })
                 except IndexError as e:
                     print('There was no shift data for this game. Error: ' + str(e))
                     fixed_events = events
@@ -2418,6 +2448,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                     ).assign(game_warning = 'NO SHIFT DATA.')
                     full_list.append(fixed_events)
                     second_time = time.time()
+                    
+                    # Track intermediates if requested
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'coordinate_source': 'api',
+                            'warning': 'NO SHIFT DATA.',
+                            'error': None,
+                            'raw_html': {
+                                'events': pages.get('events'),
+                                'roster': pages.get('roster'),
+                                'home_shifts': pages.get('home_shifts'),
+                                'away_shifts': pages.get('away_shifts'),
+                                'summary': pages.get('summary')
+                            }
+                        })
                 
                 try:
                     total_duration = second_time - first_time
@@ -2499,6 +2547,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                         finalized = merge_and_prepare(events, shifts, roster_cache)
                         full_list.append(finalized)
                         second_time = time.time()
+                        
+                        # Track intermediates if requested
+                        if return_intermediates:
+                            intermediates_list.append({
+                                'game_id': game_id,
+                                'shifts': shifts.copy() if shifts is not None else None,
+                                'api_coords': None,
+                                'coordinate_source': 'espn',
+                                'warning': None,
+                                'error': None,
+                                'raw_html': {
+                                    'events': pages.get('events'),
+                                    'roster': pages.get('roster'),
+                                    'home_shifts': pages.get('home_shifts'),
+                                    'away_shifts': pages.get('away_shifts'),
+                                    'summary': pages.get('summary')
+                                }
+                            })
                     except IndexError as e:
                         print('There was no shift data for this game. Error: ' + str(e))
                         fixed_events = events
@@ -2511,6 +2577,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                         ).assign(game_warning = 'NO SHIFT DATA', season = season)
                         fixed_events['coordinate_source'] = 'espn'
                         full_list.append(fixed_events)
+                        
+                        # Track intermediates if requested
+                        if return_intermediates:
+                            intermediates_list.append({
+                                'game_id': game_id,
+                                'shifts': None,
+                                'api_coords': None,
+                                'coordinate_source': 'espn',
+                                'warning': 'NO SHIFT DATA',
+                                'error': None,
+                                'raw_html': {
+                                    'events': pages.get('events'),
+                                    'roster': pages.get('roster'),
+                                    'home_shifts': pages.get('home_shifts'),
+                                    'away_shifts': pages.get('away_shifts'),
+                                    'summary': pages.get('summary')
+                                }
+                            })
                     second_time = time.time()
                     # Fix this so it doesn't say sourced from ESPN if no coords.
                     if single.equals(events):
@@ -2527,21 +2611,89 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('KeyError: ' + str(e))
                     print(traceback.format_exc())
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN KeyError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 except IndexError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('IndexError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN IndexError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 except TypeError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('TypeError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN TypeError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 except ExpatError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('ExpatError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN ExpatError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 
@@ -2588,6 +2740,13 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                             print('This game does not have ESPN or API coordinates. You will get it anyway, though. Issue: ' + str(e))
                             events = single
                             events['coordinate_source'] = 'none'
+                    # Determine coordinate source for this path
+                    coord_source_for_intermediates = 'espn'
+                    if 'source' in events.columns:
+                        coord_source_for_intermediates = 'api_espn_hybrid'
+                    elif 'coordinate_source' not in events.columns or events.get('coordinate_source', pd.Series(['none'])).iloc[0] == 'none':
+                        coord_source_for_intermediates = 'none'
+                    
                     try:
                         shifts = scrape_html_shifts(season, small_id, live,
                                                     home_page=pages['home_shifts'],
@@ -2597,6 +2756,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                         finalized = merge_and_prepare(events, shifts, roster_cache)
                         full_list.append(finalized)
                         second_time = time.time()
+                        
+                        # Track intermediates if requested
+                        if return_intermediates:
+                            intermediates_list.append({
+                                'game_id': game_id,
+                                'shifts': shifts.copy() if shifts is not None else None,
+                                'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                                'coordinate_source': coord_source_for_intermediates,
+                                'warning': None,
+                                'error': None,
+                                'raw_html': {
+                                    'events': pages.get('events'),
+                                    'roster': pages.get('roster'),
+                                    'home_shifts': pages.get('home_shifts'),
+                                    'away_shifts': pages.get('away_shifts'),
+                                    'summary': pages.get('summary')
+                                }
+                            })
                     except IndexError as e:
                         print('There was no shift data for this game. Error: ' + str(e))
                         fixed_events = events
@@ -2608,6 +2785,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                         columns = ['original_time', 'other_team', 'strength', 'event_player_str', 'version', 'hometeamfull', 'awayteamfull']
                         ).assign(game_warning = 'NO SHIFT DATA', season = season)
                         full_list.append(fixed_events)
+                        
+                        # Track intermediates if requested
+                        if return_intermediates:
+                            intermediates_list.append({
+                                'game_id': game_id,
+                                'shifts': None,
+                                'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                                'coordinate_source': coord_source_for_intermediates,
+                                'warning': 'NO SHIFT DATA',
+                                'error': None,
+                                'raw_html': {
+                                    'events': pages.get('events'),
+                                    'roster': pages.get('roster'),
+                                    'home_shifts': pages.get('home_shifts'),
+                                    'away_shifts': pages.get('away_shifts'),
+                                    'summary': pages.get('summary')
+                                }
+                            })
                     second_time = time.time()
                     # Fix this so it doesn't say sourced from ESPN if no coords.
                     print('Successfully scraped ' + str(game_id) + '. Coordinates sourced from ESPN.')
@@ -2619,54 +2814,224 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                 except KeyError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('KeyError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN Hybrid KeyError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 except IndexError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('IndexError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN Hybrid IndexError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 except TypeError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('TypeError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN Hybrid TypeError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
                 except ExpatError as e:
                     print('ESPN also had trouble scraping coordinates for: ' + str(game_id) + '. Looks like we will need to punt this one, unfortunately.')
                     print('ExpatError: ' + str(e))
+                    if return_intermediates:
+                        intermediates_list.append({
+                            'game_id': game_id,
+                            'shifts': None,
+                            'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'coordinate_source': None,
+                            'warning': None,
+                            'error': f'ESPN Hybrid ExpatError: {str(e)}',
+                            'error_traceback': traceback.format_exc(),
+                            'raw_html': {
+                                'events': pages.get('events') if 'pages' in locals() else None,
+                                'roster': pages.get('roster') if 'pages' in locals() else None,
+                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                                'summary': pages.get('summary') if 'pages' in locals() else None
+                            }
+                        })
                     i = i + 1
                     continue
             
-        except ConnectionError:
+        except ConnectionError as e:
             print('Got a Connection Error, time to sleep.')
+            if return_intermediates:
+                intermediates_list.append({
+                    'game_id': game_id if 'game_id' in locals() else game_id_list[i],
+                    'shifts': None,
+                    'api_coords': None,
+                    'coordinate_source': None,
+                    'warning': None,
+                    'error': f'ConnectionError: {str(e)}',
+                    'error_traceback': traceback.format_exc(),
+                    'raw_html': {
+                        'events': pages.get('events') if 'pages' in locals() else None,
+                        'roster': pages.get('roster') if 'pages' in locals() else None,
+                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                        'summary': pages.get('summary') if 'pages' in locals() else None
+                    }
+                })
             time.sleep(10)
             continue
             
-        except ChunkedEncodingError:
+        except ChunkedEncodingError as e:
             print('Got a Connection Error, time to sleep.')
+            if return_intermediates:
+                intermediates_list.append({
+                    'game_id': game_id if 'game_id' in locals() else game_id_list[i],
+                    'shifts': None,
+                    'api_coords': None,
+                    'coordinate_source': None,
+                    'warning': None,
+                    'error': f'ChunkedEncodingError: {str(e)}',
+                    'error_traceback': traceback.format_exc(),
+                    'raw_html': {
+                        'events': pages.get('events') if 'pages' in locals() else None,
+                        'roster': pages.get('roster') if 'pages' in locals() else None,
+                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                        'summary': pages.get('summary') if 'pages' in locals() else None
+                    }
+                })
             time.sleep(10)
             continue
             
         except AttributeError as e:
             print(str(game_id) + ' does not have an HTML report. Here is the error: ' + str(e))
             print(traceback.format_exc())
+            if return_intermediates:
+                intermediates_list.append({
+                    'game_id': game_id if 'game_id' in locals() else game_id_list[i],
+                    'shifts': None,
+                    'api_coords': None,
+                    'coordinate_source': None,
+                    'warning': None,
+                    'error': f'AttributeError: {str(e)}',
+                    'error_traceback': traceback.format_exc(),
+                    'raw_html': {
+                        'events': pages.get('events') if 'pages' in locals() else None,
+                        'roster': pages.get('roster') if 'pages' in locals() else None,
+                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                        'summary': pages.get('summary') if 'pages' in locals() else None
+                    }
+                })
             i = i + 1
             continue
             
         except IndexError as e:
             print(str(game_id) + ' has an issue with the HTML Report. Here is the error: ' + str(e))
             print(traceback.format_exc())
+            if return_intermediates:
+                intermediates_list.append({
+                    'game_id': game_id if 'game_id' in locals() else game_id_list[i],
+                    'shifts': shifts.copy() if 'shifts' in locals() and shifts is not None else None,
+                    'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                    'coordinate_source': None,
+                    'warning': None,
+                    'error': f'IndexError: {str(e)}',
+                    'error_traceback': traceback.format_exc(),
+                    'raw_html': {
+                        'events': pages.get('events') if 'pages' in locals() else None,
+                        'roster': pages.get('roster') if 'pages' in locals() else None,
+                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                        'summary': pages.get('summary') if 'pages' in locals() else None
+                    }
+                })
             i = i + 1
             continue
             
         except ValueError as e:
             print(str(game_id) + ' has an issue with the HTML Report. Here is the error: ' + str(e))
             print(traceback.format_exc())
+            if return_intermediates:
+                intermediates_list.append({
+                    'game_id': game_id if 'game_id' in locals() else game_id_list[i],
+                    'shifts': shifts.copy() if 'shifts' in locals() and shifts is not None else None,
+                    'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                    'coordinate_source': None,
+                    'warning': None,
+                    'error': f'ValueError: {str(e)}',
+                    'error_traceback': traceback.format_exc(),
+                    'raw_html': {
+                        'events': pages.get('events') if 'pages' in locals() else None,
+                        'roster': pages.get('roster') if 'pages' in locals() else None,
+                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                        'summary': pages.get('summary') if 'pages' in locals() else None
+                    }
+                })
             i = i + 1
             continue
 
         except KeyError as k:
-            print(str(game_id) + 'gave some kind of Key Error. Here is the error: ' + str(e))
+            print(str(game_id) + 'gave some kind of Key Error. Here is the error: ' + str(k))
+            if return_intermediates:
+                intermediates_list.append({
+                    'game_id': game_id if 'game_id' in locals() else game_id_list[i],
+                    'shifts': shifts.copy() if 'shifts' in locals() and shifts is not None else None,
+                    'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                    'coordinate_source': None,
+                    'warning': None,
+                    'error': f'KeyError: {str(k)}',
+                    'error_traceback': traceback.format_exc(),
+                    'raw_html': {
+                        'events': pages.get('events') if 'pages' in locals() else None,
+                        'roster': pages.get('roster') if 'pages' in locals() else None,
+                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
+                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
+                        'summary': pages.get('summary') if 'pages' in locals() else None
+                    }
+                })
             i = i + 1
             continue
             
@@ -2715,6 +3080,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                 
             # OPTIMIZED: Concat list to DataFrame before return
             full = pd.concat(full_list, ignore_index=True) if full_list else pd.DataFrame()
+            if return_intermediates:
+                return {'final': full, 'intermediates': intermediates_list}
             return full
     
     # OPTIMIZED: Concat list to DataFrame before final processing
@@ -2781,14 +3148,25 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
 
                 full = full[full.event_index <= full[full.event_type=='CHANGE'].iloc[-1].event_index]
 
+    if return_intermediates:
+        return {'final': full, 'intermediates': intermediates_list}
     return full
 
-def full_scrape(game_id_list, live = True, shift = False):
+def full_scrape(game_id_list, live = True, shift = False, return_intermediates = False):
     
     global hidden_patrick
     hidden_patrick = 0
     
-    df = full_scrape_1by1(game_id_list, live, shift_to_espn = shift)
+    result = full_scrape_1by1(game_id_list, live, shift_to_espn = shift, return_intermediates = return_intermediates)
+    
+    # Handle return_intermediates case
+    if return_intermediates:
+        df = result['final']
+        intermediates_list = result['intermediates']
+    else:
+        df = result
+        intermediates_list = None
+    
     print('Full scrape complete, we have this many rows:', len(df))
 
     try:
@@ -2834,13 +3212,24 @@ def full_scrape(game_id_list, live = True, shift = False):
         if len(missing)>0:
             print('You missed the following games: ' + str(missing))
             print('Let us try scraping each of them one more time.')
-            retry = full_scrape_1by1(missing)
-            df = pd.concat([df, retry], ignore_index=True)
-            return df
+            retry_result = full_scrape_1by1(missing, return_intermediates = return_intermediates)
+            if return_intermediates:
+                retry_df = retry_result['final']
+                retry_intermediates = retry_result['intermediates']
+                df = pd.concat([df, retry_df], ignore_index=True)
+                intermediates_list.extend(retry_intermediates)
+                return {'final': df, 'intermediates': intermediates_list}
+            else:
+                df = pd.concat([df, retry_result], ignore_index=True)
+                return df
         else:
+            if return_intermediates:
+                return {'final': df, 'intermediates': intermediates_list}
             return df
     
     else:
+        if return_intermediates:
+            return {'final': df, 'intermediates': intermediates_list}
         return df
 
 print("Welcome to the TopDownHockey NHL Scraper, built by Patrick Bacon.")
