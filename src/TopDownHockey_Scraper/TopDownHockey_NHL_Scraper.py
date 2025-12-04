@@ -235,6 +235,56 @@ def hs_strip_html(td):
 
     return td
 
+def parse_goaltender_summary(goalie_table):
+    """Parse the goaltender summary table into a DataFrame."""
+    
+    rows = goalie_table.find_all('tr')
+    
+    goalie_data = []
+    current_team = None
+    
+    for row in rows:
+        cells = row.find_all('td')
+        if not cells:
+            continue
+        
+        # Check if this is a team header row (contains team name)
+        first_cell_text = cells[0].get_text(strip=True)
+        
+        # Team header row - look for visitorsectionheading or homesectionheading
+        if 'visitorsectionheading' in str(cells[0].get('class', [])) or \
+           'homesectionheading' in str(cells[0].get('class', [])):
+            # Extract team name
+            if first_cell_text and first_cell_text not in ['TOI', 'GOALS-SHOTS AGAINST', 'EV', 'PP', 'SH', 'TOT', '1', '2', '3']:
+                current_team = first_cell_text
+            continue
+        
+        # Skip subheader rows (EV, PP, SH, etc.)
+        if first_cell_text in ['EV', 'PP', 'SH', 'TOT', '1', '2', '3', '']:
+            continue
+        
+        # Skip TEAM TOTALS and spacer rows
+        if 'TEAM TOTALS' in first_cell_text or first_cell_text == '\xa0':
+            continue
+        
+        # This should be a goaltender data row
+        # Check if it has position "G" in the second cell
+        if len(cells) >= 11:
+            cell_texts = [c.get_text(strip=True) for c in cells]
+            
+            # Goalie rows have: Number, "G", Name, EV, PP, SH, TOT, P1, P2, P3, TOT
+            if len(cell_texts) >= 2 and cell_texts[1] == 'G':
+                goalie_data.append({
+                    'team': current_team,
+                    'number': cell_texts[0],
+                    'name': cell_texts[2],
+                    'EV Total': cell_texts[3] if cell_texts[3] else None,
+                    'PP Total': cell_texts[4] if cell_texts[4] else None,
+                    'TOI': cell_texts[6] if cell_texts[6] else None,
+                })
+    
+    return pd.DataFrame(goalie_data)
+
 def group_if_not_none(result):
     if result is not None:
         result = result.group()
@@ -415,7 +465,7 @@ def scrape_html_roster(season, game_id, page=None):
 
     return roster_df 
 
-def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=None, roster_cache = None):
+def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=None, summary = None, roster_cache = None):
     """
     Scrape HTML shifts pages.
     
@@ -537,8 +587,32 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             
         home_extra_shifts = pd.concat(alldf_list, ignore_index=True) if alldf_list else pd.DataFrame()
 
-        if len(home_shifts[home_shifts.name.isin(goalie_names)]) == 0 and len(home_extra_shifts[home_extra_shifts.name.isin(goalie_names)]) == 0:
-            raise IndexError('This game has no shift data')
+        # Trigger: There is no home goalie for this period and we're not about to pull one from the extra shifts. 
+
+        if len(home_shifts[(home_shifts.period==max(home_shifts.period)) & (home_shifts.name.isin(goalie_names))]) == 0 and len(home_extra_shifts[home_extra_shifts.name.isin(goalie_names)]) == 0:
+
+            if type(summary) == str:
+                summary_soup = BeautifulSoup(summary)
+            else:
+                summary_soup = BeautifulSoup(summary.content.decode('ISO-8859-1'))
+
+            sections = summary_soup.find_all('td', class_='sectionheading')
+            for section in sections:
+                if 'GOALTENDER SUMMARY' in section.get_text():
+                    goalie_table = section.find_parent('tr').find_next_sibling('tr').find('table')
+                    break
+
+            goalie_summary = parse_goaltender_summary(goalie_table)
+
+            goalie_summary = goalie_summary[(goalie_summary.team==thisteam) & ~(pd.isna(goalie_summary['TOI']))]
+
+            goalie_summary = goalie_summary.assign(name = 
+                goalie_summary.name.str.split(', ').str[-1] + ' ' + goalie_summary.name.str.split(', ').str[0]
+            )
+
+            goalie_summary = goalie_summary.assign(period = max(home_shifts.period), shifts = '1', avg = goalie_summary.TOI, venue = 'home').loc[:, home_extra_shifts.columns]
+
+            home_extra_shifts = pd.concat([home_extra_shifts, goalie_summary])
 
         home_extra_shifts = home_extra_shifts.assign(TOI_seconds_summary = home_extra_shifts.TOI.apply(lambda x: convert_clock_to_seconds(x)))
 
@@ -591,23 +665,26 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             )
 
             shifts_needing_to_be_added = shifts_needing_to_be_added.merge(
-            home_shifts.assign(shift_number = home_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'})
-            )
+                home_shifts.assign(shift_number = home_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'}),
+                how = 'left'
+            ).fillna(0)
 
             shifts_needing_to_be_added = shifts_needing_to_be_added.assign(shift_number = shifts_needing_to_be_added.prior_max_shift + 1)
+
+            shifts_needing_to_be_added.shift_number = shifts_needing_to_be_added.shift_number.astype(int)
 
             shifts_needing_to_be_added = shifts_needing_to_be_added.loc[:, ['shift_number', 'period', 'shift_start', 'shift_end', 'duration', 'name', 'number', 'team', 'venue']]
 
             shifts_needing_to_be_added['number'] = shifts_needing_to_be_added['number'].astype(int)
 
             home_shifts = pd.concat([home_shifts, shifts_needing_to_be_added]).sort_values(by = ['number', 'period', 'shift_number'])
-    
+
         elif len(shifts_needing_to_be_added) == 0:
             home_clock_period = None
             home_clock_time_now = None
 
     if away_page is None:
-        url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TV0' + game_id + '.HTM'
+        url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TH0' + game_id + '.HTM'
         
         # TIME: away shifts network request
         net_start = time.time()
@@ -712,8 +789,32 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             
         away_extra_shifts = pd.concat(alldf_list, ignore_index=True) if alldf_list else pd.DataFrame()
 
-        if len(away_shifts[away_shifts.name.isin(goalie_names)]) == 0 and len(away_extra_shifts[away_extra_shifts.name.isin(goalie_names)]) == 0:
-            raise IndexError('This game has no shift data')
+        # Trigger: There is no away goalie for this period and we're not about to pull one from the extra shifts. 
+
+        if len(away_shifts[(away_shifts.period==max(away_shifts.period)) & (away_shifts.name.isin(goalie_names))]) == 0 and len(away_extra_shifts[away_extra_shifts.name.isin(goalie_names)]) == 0:
+
+            if type(summary) == str:
+                summary_soup = BeautifulSoup(summary)
+            else:
+                summary_soup = BeautifulSoup(summary.content.decode('ISO-8859-1'))
+
+            sections = summary_soup.find_all('td', class_='sectionheading')
+            for section in sections:
+                if 'GOALTENDER SUMMARY' in section.get_text():
+                    goalie_table = section.find_parent('tr').find_next_sibling('tr').find('table')
+                    break
+
+            goalie_summary = parse_goaltender_summary(goalie_table)
+
+            goalie_summary = goalie_summary[(goalie_summary.team==thisteam) & ~(pd.isna(goalie_summary['TOI']))]
+
+            goalie_summary = goalie_summary.assign(name = 
+                goalie_summary.name.str.split(', ').str[-1] + ' ' + goalie_summary.name.str.split(', ').str[0]
+            )
+
+            goalie_summary = goalie_summary.assign(period = max(away_shifts.period), shifts = '1', avg = goalie_summary.TOI, venue = 'away').loc[:, away_extra_shifts.columns]
+
+            away_extra_shifts = pd.concat([away_extra_shifts, goalie_summary])
 
         away_extra_shifts = away_extra_shifts.assign(TOI_seconds_summary = away_extra_shifts.TOI.apply(lambda x: convert_clock_to_seconds(x)))
 
@@ -766,10 +867,13 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             )
 
             shifts_needing_to_be_added = shifts_needing_to_be_added.merge(
-            away_shifts.assign(shift_number = away_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'})
-            )
+                away_shifts.assign(shift_number = away_shifts.shift_number.astype(int)).groupby('name')['shift_number'].max().reset_index().rename(columns = {'shift_number':'prior_max_shift'}),
+                how = 'left'
+            ).fillna(0)
 
             shifts_needing_to_be_added = shifts_needing_to_be_added.assign(shift_number = shifts_needing_to_be_added.prior_max_shift + 1)
+
+            shifts_needing_to_be_added.shift_number = shifts_needing_to_be_added.shift_number.astype(int)
 
             shifts_needing_to_be_added = shifts_needing_to_be_added.loc[:, ['shift_number', 'period', 'shift_start', 'shift_end', 'duration', 'name', 'number', 'team', 'venue']]
 
@@ -2141,6 +2245,7 @@ def _fetch_all_pages_parallel(season, game_id):
     roster_url = f'http://www.nhl.com/scores/htmlreports/{season}/RO0{small_id}.HTM'
     home_shifts_url = f'http://www.nhl.com/scores/htmlreports/{season}/TH0{small_id}.HTM'
     away_shifts_url = f'http://www.nhl.com/scores/htmlreports/{season}/TV0{small_id}.HTM'
+    summary_url = f'https://www.nhl.com/scores/htmlreports/{season}/GS0{small_id}.HTM'
     
     # Fetch HTML pages concurrently (4 pages)
     fetch_start = time.time()
@@ -2152,7 +2257,8 @@ def _fetch_all_pages_parallel(season, game_id):
             'events': executor.submit(_fetch_url, events_url, timeout=10),
             'roster': executor.submit(_fetch_url, roster_url, timeout=10),
             'home_shifts': executor.submit(_fetch_url, home_shifts_url, timeout=10),
-            'away_shifts': executor.submit(_fetch_url, away_shifts_url, timeout=10)
+            'away_shifts': executor.submit(_fetch_url, away_shifts_url, timeout=10),
+            'summary': executor.submit(_fetch_url, summary_url, timeout=10)
         }
         
         # Create reverse mapping from future to key
@@ -2199,6 +2305,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
             
             # OPTIMIZED: Fetch HTML pages in parallel, API separately
             parallel_start = time.time()
+            print('Fetching pages')
             pages = _fetch_all_pages_parallel(season, game_id)
             parallel_duration = time.time() - parallel_start
             try:
@@ -2250,6 +2357,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                 except Exception:
                     pass
                 
+
+                
                 # TIME: Fix Missing
                 try:
                     fix_start = time.time()
@@ -2262,19 +2371,22 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                 except IndexError as e:
                     print('Issue when fixing problematic events. Here it is: ' + str(e))
                     continue
-                
+                print(pages)
                 # TIME: Shifts and Finalize (using pre-fetched pages)
                 try:
+                    print(pages)
                     shifts_start = time.time()
                     if live == True:
                         min_game_clock, shifts = scrape_html_shifts(season, small_id, live, 
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
+                                                    summary = pages['summary'],
                                                     roster_cache = roster_cache)
                     else:
                         shifts = scrape_html_shifts(season, small_id, live, 
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
+                                                    summary = pages['summary'],
                                                     roster_cache = roster_cache)
                     shifts_duration = time.time() - shifts_start
                     try:
@@ -2382,6 +2494,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                         shifts = scrape_html_shifts(season, small_id, live,
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
+                                                    summary = pages['summary'],
                                                     roster_cache = roster_cache)
                         finalized = merge_and_prepare(events, shifts, roster_cache)
                         full_list.append(finalized)
@@ -2479,6 +2592,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True):
                         shifts = scrape_html_shifts(season, small_id, live,
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
+                                                    summary = pages['summary'],
                                                     roster_cache = roster_cache)
                         finalized = merge_and_prepare(events, shifts, roster_cache)
                         full_list.append(finalized)
