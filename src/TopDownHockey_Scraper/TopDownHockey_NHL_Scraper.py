@@ -260,7 +260,7 @@ def parse_goaltender_summary(goalie_table):
             continue
         
         # Skip subheader rows (EV, PP, SH, etc.)
-        if first_cell_text in ['EV', 'PP', 'SH', 'TOT', '1', '2', '3', '']:
+        if first_cell_text in ['EV', 'PP', 'SH', 'TOT', '']:
             continue
         
         # Skip TEAM TOTALS and spacer rows
@@ -480,6 +480,8 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         DataFrame with shift information
     """
     goalie_names = roster_cache[roster_cache.Pos=='G'].Name.unique().tolist()
+    home_goalie_names = roster_cache[(roster_cache.Pos=='G') & (roster_cache.team=='home')].Name.unique().tolist()
+    away_goalie_names = roster_cache[(roster_cache.Pos=='G') & (roster_cache.team=='away')].Name.unique().tolist()
 
     if home_page is None:
         url = 'http://www.nhl.com/scores/htmlreports/' + season + '/TH0' + game_id + '.HTM'
@@ -593,7 +595,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
         # Trigger: There is no home goalie for this period and we're not about to pull one from the extra shifts. 
 
-        if len(home_shifts[(home_shifts.period==max(home_shifts.period)) & (home_shifts.name.isin(goalie_names))]) == 0 and len(home_extra_shifts[home_extra_shifts.name.isin(goalie_names)]) == 0:
+        if len(home_shifts[(home_shifts.period==max(home_shifts.period)) & (home_shifts.name.isin(home_goalie_names))]) == 0 and len(home_extra_shifts[home_extra_shifts.name.isin(home_goalie_names)]) == 0:
 
             if type(summary) == str:
                 summary_soup = BeautifulSoup(summary)
@@ -613,6 +615,8 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             goalie_summary = goalie_summary.assign(name = 
                 goalie_summary.name.str.split(', ').str[-1] + ' ' + goalie_summary.name.str.split(', ').str[0]
             )
+
+            goalie_summary.name = goalie_summary.name.str.normalize('NFKD').str.encode('ascii', errors='ignore').str.decode('utf-8').str.upper()
 
             goalie_summary = goalie_summary.assign(period = max(home_shifts.period), shifts = '1', avg = goalie_summary.TOI, venue = 'home').loc[:, home_extra_shifts.columns]
 
@@ -638,18 +642,14 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             home_shifts.period==max(home_shifts.period)
             ].sort_values(by = 'period_secs', ascending = False).period_secs.iloc[0]
 
-            latest_shift_end = convert_seconds_to_clock(latest_shift_end)
+            max_toi = shifts_needing_to_be_added.TOI.apply(lambda x: convert_clock_to_seconds(x)).max()
 
-            goalie_toi = shifts_needing_to_be_added[shifts_needing_to_be_added.name.isin(goalie_names)].TOI.apply(lambda x: convert_clock_to_seconds(x)).iloc[0]
+            overage = max_toi - latest_shift_end
 
-            goalie_toi = convert_seconds_to_clock(goalie_toi)
+            if overage > 0:
+                shifts_needing_to_be_added.toi_diff = shifts_needing_to_be_added.toi_diff - overage
 
-            if latest_shift_end >= goalie_toi:
-                home_clock_time_now = latest_shift_end
-            else:
-                home_clock_time_now = goalie_toi
-
-                print('Antlion')
+            home_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
             home_clock_period = max(home_shifts.period.astype(int))
 
@@ -799,7 +799,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
         # Trigger: There is no away goalie for this period and we're not about to pull one from the extra shifts. 
 
-        if len(away_shifts[(away_shifts.period==max(away_shifts.period)) & (away_shifts.name.isin(goalie_names))]) == 0 and len(away_extra_shifts[away_extra_shifts.name.isin(goalie_names)]) == 0:
+        if len(away_shifts[(away_shifts.period==max(away_shifts.period)) & (away_shifts.name.isin(away_goalie_names))]) == 0 and len(away_extra_shifts[away_extra_shifts.name.isin(away_goalie_names)]) == 0:
 
             if type(summary) == str:
                 summary_soup = BeautifulSoup(summary)
@@ -819,6 +819,8 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             goalie_summary = goalie_summary.assign(name = 
                 goalie_summary.name.str.split(', ').str[-1] + ' ' + goalie_summary.name.str.split(', ').str[0]
             )
+
+            goalie_summary.name = goalie_summary.name.str.normalize('NFKD').str.encode('ascii', errors='ignore').str.decode('utf-8').str.upper()
 
             goalie_summary = goalie_summary.assign(period = max(away_shifts.period), shifts = '1', avg = goalie_summary.TOI, venue = 'away').loc[:, away_extra_shifts.columns]
 
@@ -844,18 +846,14 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             away_shifts.period==max(away_shifts.period)
             ].sort_values(by = 'period_secs', ascending = False).period_secs.iloc[0]
 
-            latest_shift_end = convert_seconds_to_clock(latest_shift_end)
+            max_toi = shifts_needing_to_be_added.TOI.apply(lambda x: convert_clock_to_seconds(x)).max()
 
-            goalie_toi = shifts_needing_to_be_added[shifts_needing_to_be_added.name.isin(goalie_names)].TOI.apply(lambda x: convert_clock_to_seconds(x)).iloc[0]
+            overage = max_toi - latest_shift_end
 
-            goalie_toi = convert_seconds_to_clock(goalie_toi)
+            if overage > 0:
+                shifts_needing_to_be_added.toi_diff = shifts_needing_to_be_added.toi_diff - overage
 
-            if latest_shift_end >= goalie_toi:
-                away_clock_time_now = latest_shift_end
-            else:
-                away_clock_time_now = goalie_toi
-
-                print('Antlion')
+            away_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
             away_clock_period = max(away_shifts.period.astype(int))
 
@@ -892,71 +890,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         elif len(shifts_needing_to_be_added) == 0:
             away_clock_period = None
             away_clock_time_now = None
-
-        home_shifts = home_shifts.assign(
-            shift_end = np.where(
-                (home_shifts.shift_end.str.startswith('00:')) | 
-                (home_shifts.shift_end.str.startswith('01:')) |
-                (home_shifts.shift_end.str.startswith('02:')) |
-                (home_shifts.shift_end.str.startswith('03:')) |
-                (home_shifts.shift_end.str.startswith('04:')) |
-                (home_shifts.shift_end.str.startswith('05:')) |
-                (home_shifts.shift_end.str.startswith('06:')) |
-                (home_shifts.shift_end.str.startswith('07:')) | 
-                (home_shifts.shift_end.str.startswith('08:')) |
-                (home_shifts.shift_end.str.startswith('09:')),
-                home_shifts.shift_end.str[1:], home_shifts.shift_end
-            )
-        )
-
-        away_shifts = away_shifts.assign(
-            shift_end = np.where(
-                (away_shifts.shift_end.str.startswith('00:')) | 
-                (away_shifts.shift_end.str.startswith('01:')) |
-                (away_shifts.shift_end.str.startswith('02:')) |
-                (away_shifts.shift_end.str.startswith('03:')) |
-                (away_shifts.shift_end.str.startswith('04:')) |
-                (away_shifts.shift_end.str.startswith('05:')) |
-                (away_shifts.shift_end.str.startswith('06:')) |
-                (away_shifts.shift_end.str.startswith('07:')) | 
-                (away_shifts.shift_end.str.startswith('08:')) |
-                (away_shifts.shift_end.str.startswith('09:')),
-                away_shifts.shift_end.str[1:], away_shifts.shift_end
-            )
-        )
-
-        home_shifts = home_shifts.assign(
-            shift_start = np.where(
-                (home_shifts.shift_start.str.startswith('00:')) | 
-                (home_shifts.shift_start.str.startswith('01:')) |
-                (home_shifts.shift_start.str.startswith('02:')) |
-                (home_shifts.shift_start.str.startswith('03:')) |
-                (home_shifts.shift_start.str.startswith('04:')) |
-                (home_shifts.shift_start.str.startswith('05:')) |
-                (home_shifts.shift_start.str.startswith('06:')) |
-                (home_shifts.shift_start.str.startswith('07:')) | 
-                (home_shifts.shift_start.str.startswith('08:')) |
-                (home_shifts.shift_start.str.startswith('09:')),
-                home_shifts.shift_start.str[1:], home_shifts.shift_start
-            )
-        )
-
-        away_shifts = away_shifts.assign(
-            shift_start = np.where(
-                (away_shifts.shift_start.str.startswith('00:')) | 
-                (away_shifts.shift_start.str.startswith('01:')) |
-                (away_shifts.shift_start.str.startswith('02:')) |
-                (away_shifts.shift_start.str.startswith('03:')) |
-                (away_shifts.shift_start.str.startswith('04:')) |
-                (away_shifts.shift_start.str.startswith('05:')) |
-                (away_shifts.shift_start.str.startswith('06:')) |
-                (away_shifts.shift_start.str.startswith('07:')) | 
-                (away_shifts.shift_start.str.startswith('08:')) |
-                (away_shifts.shift_start.str.startswith('09:')),
-                away_shifts.shift_start.str[1:], away_shifts.shift_start
-            )
-        )
-    
+        
     global all_shifts
     
     all_shifts = pd.concat([home_shifts, away_shifts])
@@ -1379,10 +1313,10 @@ def scrape_html_events(season, game_id, events_page=None, roster_page=None):
     
     # TIME: Total parsing
     total_parse_duration = time.time() - parse_start
-    try:
-        print(f'  ⏱️ HTML events parsing/processing: {total_parse_duration:.2f}s')
-    except Exception:
-        pass
+    # try:
+    #     print(f'  ⏱️ HTML events parsing/processing: {total_parse_duration:.2f}s')
+    # except Exception:
+    #     pass
     
     # OPTIMIZATION: Return roster to avoid re-scraping in merge_and_prepare
     return game.drop(columns = ['period_seconds', 'time', 'priority', 'home_skater_count_temp', 'away_skater_count_temp']), roster
@@ -1799,7 +1733,7 @@ def scrape_espn_ids_single_game(game_date, home_team, away_team):
         
     return(gamedays)
 
-def merge_and_prepare(events, shifts, roster=None):
+def merge_and_prepare(events, shifts, roster=None, live = False):
     
     season = str(int(str(events.game_id.iloc[0])[:4])) + str(int(str(events.game_id.iloc[0])[:4]) + 1)
     small_id = str(events.game_id.iloc[0])[5:]
@@ -2177,6 +2111,25 @@ def merge_and_prepare(events, shifts, roster=None):
               'jumping_on':'players_on', 'jumping_off':'players_off'}
     )
 
+    if live == True:
+        # Compare finalized to events to see if we have events where the PBP does not match the skaters on ice in the shifts.
+        # This can happen when players are taking their first shift of the game and thus do not appear in the time on ice HTML page.
+        # Find events in finalized where skater count doesn't match, then get rid of everything beneath them.
+        comparison_df = events.assign(events_away_skater_count = events.away_skaters.str.count('\xa0'), events_home_skater_count = events.home_skaters.str.count('\xa0'))[
+            events.event.isin(ewc)
+        ].loc[:,
+        ['period', 'game_seconds', 'event', 'description', 'events_away_skater_count', 'events_home_skater_count']].merge(
+            game[game.event_type.isin(ewc)].loc[:, ['game_period', 'game_seconds', 'event_index', 'event_type', 'event_description', 'home_skaters', 'away_skaters']].rename(
+            columns = {'game_period':'period', 'event_type':'event', 'event_description':'description', 'away_skaters':'pbp_away_skater_count', 'home_skaters':'pbp_home_skater_count'}
+        ))
+
+        mismatches = comparison_df[(comparison_df.pbp_away_skater_count != comparison_df.events_away_skater_count) | 
+                (comparison_df.pbp_home_skater_count != comparison_df.events_home_skater_count)]
+
+        # Ditch the mismatched event and everything that comes after it!
+        if len(mismatches) > 0:
+            game = game[game.event_index < mismatches.event_index.min()]
+
     return(game)
 
 def fix_missing(single, event_coords, events):
@@ -2406,7 +2359,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         pass
                     
                     prepare_start = time.time()
-                    finalized = merge_and_prepare(events, shifts, roster_cache)
+                    finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                     if live == True:
                         if min_game_clock is not None:
                             finalized = finalized[finalized.game_seconds <= min_game_clock]
@@ -2544,7 +2497,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                                     away_page=pages['away_shifts'],
                                                     summary = pages['summary'],
                                                     roster_cache = roster_cache)
-                        finalized = merge_and_prepare(events, shifts, roster_cache)
+                        finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                         full_list.append(finalized)
                         second_time = time.time()
                         
@@ -2753,7 +2706,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                                     away_page=pages['away_shifts'],
                                                     summary = pages['summary'],
                                                     roster_cache = roster_cache)
-                        finalized = merge_and_prepare(events, shifts, roster_cache)
+                        finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                         full_list.append(finalized)
                         second_time = time.time()
                         
