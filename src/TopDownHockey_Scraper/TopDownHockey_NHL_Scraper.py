@@ -2126,8 +2126,14 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
         mismatches = comparison_df[(comparison_df.pbp_away_skater_count != comparison_df.events_away_skater_count) | 
                 (comparison_df.pbp_home_skater_count != comparison_df.events_home_skater_count)]
 
+        # We initially just ditched the mismatched event and everything that came beneath it.
+        # But then we ran into an error: We can have a play where the player comes on the ice as a penalty expires. We have a "5v4" goal but PBP events show it as 5v5.
+        # NHL dot com video description calls it "Power Play Goal" but doesn't show PP under it. 
+        # This is pretty tricky to handle. Because the initial "mismatch comparison" was designed to catch events where the shift was just a few seconds off, let's do it this way.
+
         # Ditch the mismatched event and everything that comes after it!
-        if len(mismatches) > 0:
+        # If we have multiple mismatches and not many events after it. 
+        if len(mismatches) > 1 and len(game[game.game_seconds >= mismatches.game_seconds.max()]) < 20:
             game = game[game.event_index < mismatches.event_index.min()]
 
     return(game)
