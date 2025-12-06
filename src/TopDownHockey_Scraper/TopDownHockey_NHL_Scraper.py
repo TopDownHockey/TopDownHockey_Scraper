@@ -1251,6 +1251,7 @@ def scrape_html_events(season, game_id, events_page=None, roster_page=None):
                               3900))
     
     # OPTIMIZED: Use dictionary lookup instead of nested np.where()
+    # TODO: Fix priority map so that we have change before shot or miss if the change involves a player returning from penalty box. 
     priority_map = {
         'TAKE': 1, 'GIVE': 1, 'MISS': 1, 'HIT': 1, 'SHOT': 1, 'BLOCK': 1,
         'GOAL': 2, 'STOP': 3, 'DELPEN': 4, 'PENL': 5, 'CHANGE': 6,
@@ -1817,6 +1818,7 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
                           np.where((merged.team==merged.home_team) & (merged.event=='CHANGE') , 1,
                                   np.where((merged.team==merged.away_team) & (merged.event=='CHANGE'), -1, 0)))
 
+    # TODO: Fix priority map so that we have change before shot or miss if the change involves a player returning from penalty box. 
     merged = merged.assign(priority = np.where(merged.event.isin(['TAKE', 'GIVE', 'MISS', 'HIT', 'SHOT', 'BLOCK']), 1, 
                                                 np.where(merged.event=="GOAL", 2,
                                                     np.where(merged.event=="STOP", 3,
@@ -2136,6 +2138,13 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
         if len(mismatches) > 1 and len(game[game.game_seconds >= mismatches.game_seconds.max()]) < 20:
             game = game[game.event_index < mismatches.event_index.min()]
 
+        game[(game.event_type.isin(ewc)) & (game.home_skaters < 0)]
+
+    if live == True:
+        mismatches = game[(game.event_type.isin(ewc + ['FAC'])) & ((game.home_skaters < 3) | (game.home_skaters > 6) | (game.away_skaters < 3) | (game.away_skaters > 6))]
+        if len(mismatches) > 0:
+            game = game[game.event_index < mismatches.event_index.min()]
+
     return(game)
 
 def fix_missing(single, event_coords, events):
@@ -2384,6 +2393,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': shifts.copy() if shifts is not None else None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'roster_cache': roster_cache.copy() if roster_cache is not None else None,
                             'coordinate_source': 'api',
                             'warning': None,
                             'error': None,
@@ -2414,6 +2424,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': 'api',
                             'warning': 'NO SHIFT DATA.',
                             'error': None,
@@ -2513,6 +2524,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'game_id': game_id,
                                 'shifts': shifts.copy() if shifts is not None else None,
                                 'api_coords': None,
+                                'roster_cache': roster_cache.copy() if roster_cache is not None else None,
                                 'coordinate_source': 'espn',
                                 'warning': None,
                                 'error': None,
@@ -2543,6 +2555,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'game_id': game_id,
                                 'shifts': None,
                                 'api_coords': None,
+                                'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                                 'coordinate_source': 'espn',
                                 'warning': 'NO SHIFT DATA',
                                 'error': None,
@@ -2575,6 +2588,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN KeyError: {str(e)}',
@@ -2597,6 +2611,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN IndexError: {str(e)}',
@@ -2619,6 +2634,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN TypeError: {str(e)}',
@@ -2641,6 +2657,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN ExpatError: {str(e)}',
@@ -2722,6 +2739,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'game_id': game_id,
                                 'shifts': shifts.copy() if shifts is not None else None,
                                 'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                                'roster_cache': roster_cache.copy() if roster_cache is not None else None,
                                 'coordinate_source': coord_source_for_intermediates,
                                 'warning': None,
                                 'error': None,
@@ -2751,6 +2769,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'game_id': game_id,
                                 'shifts': None,
                                 'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                                'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                                 'coordinate_source': coord_source_for_intermediates,
                                 'warning': 'NO SHIFT DATA',
                                 'error': None,
@@ -2778,6 +2797,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN Hybrid KeyError: {str(e)}',
@@ -2800,6 +2820,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN Hybrid IndexError: {str(e)}',
@@ -2822,6 +2843,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN Hybrid TypeError: {str(e)}',
@@ -2844,6 +2866,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'game_id': game_id,
                             'shifts': None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                            'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                             'coordinate_source': None,
                             'warning': None,
                             'error': f'ESPN Hybrid ExpatError: {str(e)}',
@@ -2866,6 +2889,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
                     'shifts': None,
                     'api_coords': None,
+                    'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                     'coordinate_source': None,
                     'warning': None,
                     'error': f'ConnectionError: {str(e)}',
@@ -2888,6 +2912,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
                     'shifts': None,
                     'api_coords': None,
+                    'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                     'coordinate_source': None,
                     'warning': None,
                     'error': f'ChunkedEncodingError: {str(e)}',
@@ -2911,6 +2936,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
                     'shifts': None,
                     'api_coords': None,
+                    'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                     'coordinate_source': None,
                     'warning': None,
                     'error': f'AttributeError: {str(e)}',
@@ -2934,6 +2960,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
                     'shifts': shifts.copy() if 'shifts' in locals() and shifts is not None else None,
                     'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                    'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                     'coordinate_source': None,
                     'warning': None,
                     'error': f'IndexError: {str(e)}',
@@ -2957,6 +2984,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
                     'shifts': shifts.copy() if 'shifts' in locals() and shifts is not None else None,
                     'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                    'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                     'coordinate_source': None,
                     'warning': None,
                     'error': f'ValueError: {str(e)}',
@@ -2979,6 +3007,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
                     'shifts': shifts.copy() if 'shifts' in locals() and shifts is not None else None,
                     'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
+                    'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
                     'coordinate_source': None,
                     'warning': None,
                     'error': f'KeyError: {str(k)}',
