@@ -2135,7 +2135,7 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
 
         # Ditch the mismatched event and everything that comes after it!
         # If we have multiple mismatches and not many events after it. 
-        if len(mismatches) > 1 and len(game[game.game_seconds >= mismatches.game_seconds.max()]) < 20:
+        if len(mismatches) > 1 and len(game[game.game_seconds >= mismatches.game_seconds.min()]) < 20:
             game = game[game.event_index < mismatches.event_index.min()]
 
         game[(game.event_type.isin(ewc)) & (game.home_skaters < 0)]
