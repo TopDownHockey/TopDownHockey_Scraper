@@ -3136,6 +3136,14 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
 
                 full = full[full.event_index <= full[full.event_type=='CHANGE'].iloc[-1].event_index]
 
+            if len(full[(full.event_type == 'SHOT') & 
+                (((full.event_team==full.home_team) & (full.away_goalie=='\xa0')) | ((full.event_team==full.away_team) & (full.home_goalie=='\xa0')))
+            ]) > 0:
+                latest_bad_event = full[(full.event_type == 'SHOT') & 
+                (((full.event_team==full.home_team) & (full.away_goalie=='\xa0')) | ((full.event_team==full.away_team) & (full.home_goalie=='\xa0')))
+                ].event_index.min()
+                full = full[full.event_index < latest_bad_event]
+
     if return_intermediates:
         return {'final': full, 'intermediates': intermediates_list}
     return full
