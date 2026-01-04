@@ -1,6 +1,6 @@
 """TopDownHockey Scraper Package"""
 
-__version__ = "6.1.9"
+__version__ = "6.1.22"
 
 
 

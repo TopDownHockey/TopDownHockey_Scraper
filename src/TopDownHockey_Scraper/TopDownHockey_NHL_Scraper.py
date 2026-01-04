@@ -101,8 +101,6 @@ ewc = ['SHOT', 'HIT', 'BLOCK', 'MISS', 'GIVE', 'TAKE', 'GOAL']
 
 from TopDownHockey_Scraper.name_corrections import NAME_CORRECTIONS, normalize_player_name
 
-print('6.1.13 coming your way')
-
 def subtract_from_twenty_minutes(time_string):
     # Parse the input time string
     minutes, seconds = map(int, time_string.split(':'))
@@ -290,7 +288,7 @@ def group_if_not_none(result):
         result = result.group()
     return(result)
 
-def scrape_html_roster(season, game_id, page=None):
+def scrape_html_roster(season, game_id, page=None, verbose=False):
     """
     Scrape HTML roster page.
     
@@ -298,6 +296,7 @@ def scrape_html_roster(season, game_id, page=None):
         season: Season string (e.g., '20242025')
         game_id: Game ID string (e.g., '020333')
         page: Optional pre-fetched requests.Response object. If None, will fetch the page.
+        verbose: If True, print detailed timing information
     
     Returns:
         DataFrame with roster information
@@ -309,10 +308,11 @@ def scrape_html_roster(season, game_id, page=None):
         net_start = time.time()
         page = _session.get(url, timeout=10)
         net_duration = time.time() - net_start
-        try:
-            print(f'  ⏱️ Roster network request: {net_duration:.2f}s')
-        except Exception:
-            pass
+        if verbose:
+            try:
+                print(f'  ⏱️ Roster network request: {net_duration:.2f}s')
+            except Exception:
+                pass
     
     # OPTIMIZED: Use lxml directly instead of BeautifulSoup for faster parsing
     if type(page) == str:
@@ -465,7 +465,7 @@ def scrape_html_roster(season, game_id, page=None):
 
     return roster_df 
 
-def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=None, summary = None, roster_cache = None):
+def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=None, summary = None, roster_cache = None, verbose=False):
     """
     Scrape HTML shifts pages.
     
@@ -475,6 +475,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         live: Boolean flag for live games
         home_page: Optional pre-fetched requests.Response object for home shifts page. If None, will fetch.
         away_page: Optional pre-fetched requests.Response object for away shifts page. If None, will fetch.
+        summary: Optional summary page for goalie data
+        roster_cache: Roster cache for goalie names
+        verbose: If True, print detailed timing information
     
     Returns:
         DataFrame with shift information
@@ -490,10 +493,11 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         net_start = time.time()
         home_page = _session.get(url, timeout=10)
         net_duration = time.time() - net_start
-        try:
-            print(f'  ⏱️ Home shifts network request: {net_duration:.2f}s')
-        except Exception:
-            pass
+        if verbose:
+            try:
+                print(f'  ⏱️ Home shifts network request: {net_duration:.2f}s')
+            except Exception:
+                pass
 
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
@@ -694,10 +698,11 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         net_start = time.time()
         away_page = _session.get(url, timeout=10)
         net_duration = time.time() - net_start
-        try:
-            print(f'  ⏱️ away shifts network request: {net_duration:.2f}s')
-        except Exception:
-            pass
+        if verbose:
+            try:
+                print(f'  ⏱️ away shifts network request: {net_duration:.2f}s')
+            except Exception:
+                pass
 
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
@@ -1088,7 +1093,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
     return full_changes.reset_index(drop = True)
 
-def scrape_html_events(season, game_id, events_page=None, roster_page=None):
+def scrape_html_events(season, game_id, events_page=None, roster_page=None, verbose=False):
     """
     Scrape HTML events page.
     
@@ -1097,6 +1102,7 @@ def scrape_html_events(season, game_id, events_page=None, roster_page=None):
         game_id: Game ID string (e.g., '020333')
         events_page: Optional pre-fetched requests.Response object for events page. If None, will fetch.
         roster_page: Optional pre-fetched requests.Response object for roster page. If None, will fetch.
+        verbose: If True, print detailed timing information
     
     Returns:
         Tuple of (events DataFrame, roster DataFrame)
@@ -1109,10 +1115,11 @@ def scrape_html_events(season, game_id, events_page=None, roster_page=None):
         net_start = time.time()
         events_page = _session.get(url, timeout=10)
         net_duration = time.time() - net_start
-        try:
-            print(f'  ⏱️ HTML events network request: {net_duration:.2f}s')
-        except Exception:
-            pass
+        if verbose:
+            try:
+                print(f'  ⏱️ HTML events network request: {net_duration:.2f}s')
+            except Exception:
+                pass
     
     #if int(season)<20092010):
      #   soup = BeautifulSoup(page.content, 'html.parser')
@@ -1218,7 +1225,7 @@ def scrape_html_events(season, game_id, events_page=None, roster_page=None):
     
     #return game
     
-    roster = scrape_html_roster(season, game_id, page=roster_page).rename(columns = {'Nom/Name':'Name'})
+    roster = scrape_html_roster(season, game_id, page=roster_page, verbose=verbose).rename(columns = {'Nom/Name':'Name'})
     roster = roster[roster.status=='player']
     roster = roster.assign(team_abbreviated = np.where(roster.team=='home', 
                                                        game.home_team_abbreviated.iloc[0],
@@ -2202,13 +2209,14 @@ def fix_missing(single, event_coords, events):
     
     return(events)
 
-def _fetch_all_pages_parallel(season, game_id):
+def _fetch_all_pages_parallel(season, game_id, verbose=False):
     """
     Fetch all required HTML pages in parallel.
     
     Args:
         season: Season string (e.g., '20242025')
         game_id: Full game ID (e.g., 2025020333)
+        verbose: If True, print detailed timing information
     
     Returns:
         Dictionary with keys: 'events', 'roster', 'home_shifts', 'away_shifts'
@@ -2225,7 +2233,8 @@ def _fetch_all_pages_parallel(season, game_id):
     
     # Fetch HTML pages concurrently (4 pages)
     fetch_start = time.time()
-    print('  🔄 Fetching HTML pages in parallel...')
+    if verbose:
+        print('  🔄 Fetching HTML pages in parallel...')
     
     with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit HTML fetch tasks only
@@ -2247,14 +2256,15 @@ def _fetch_all_pages_parallel(season, game_id):
             results[key] = future.result()  # Will raise if HTTP error
     
     html_fetch_duration = time.time() - fetch_start
-    try:
-        print(f'  ⏱️ HTML pages fetched in: {html_fetch_duration:.2f}s')
-    except Exception:
-        pass
+    if verbose:
+        try:
+            print(f'  ⏱️ HTML pages fetched in: {html_fetch_duration:.2f}s')
+        except Exception:
+            pass
     
     return results
 
-def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False):
+def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False, verbose = False):
     
     global single
     global event_coords
@@ -2276,7 +2286,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
         
         try:
             first_time = time.time()
-            print(game_id_list[i]) 
             game_id = game_id_list[i]
             print('Attempting scrape for: ' + str(game_id))
             season = str(int(str(game_id)[:4])) + str(int(str(game_id)[:4]) + 1)
@@ -2284,25 +2293,30 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
             
             # OPTIMIZED: Fetch HTML pages in parallel, API separately
             parallel_start = time.time()
-            print('Fetching pages')
-            pages = _fetch_all_pages_parallel(season, game_id)
+            if verbose:
+                print('Fetching pages')
+            pages = _fetch_all_pages_parallel(season, game_id, verbose=verbose)
             parallel_duration = time.time() - parallel_start
-            try:
-                print(f'⏱️ Parallel fetch took: {parallel_duration:.2f}s')
-            except Exception:
-                pass
+            if verbose:
+                try:
+                    print(f'⏱️ Parallel fetch took: {parallel_duration:.2f}s')
+                except Exception:
+                    pass
             
             # TIME: HTML Events (using pre-fetched pages)
             html_start = time.time()
-            print('Scraping HTML events')
+            if verbose:
+                print('Scraping HTML events')
             single, roster_cache = scrape_html_events(season, small_id, 
                                                       events_page=pages['events'], 
-                                                      roster_page=pages['roster'])
+                                                      roster_page=pages['roster'],
+                                                      verbose=verbose)
             html_duration = time.time() - html_start
-            try:
-                print(f'⏱️ HTML events processing took: {html_duration:.2f}s')
-            except Exception:
-                pass
+            if verbose:
+                try:
+                    print(f'⏱️ HTML events processing took: {html_duration:.2f}s')
+                except Exception:
+                    pass
             single['game_id'] = int(game_id)
             
             # Try NHL API first (default behavior)
@@ -2310,13 +2324,15 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
             try:
                 # TIME: API Events (fetch after HTML events are processed, like original)
                 api_start = time.time()
-                print('Attempting to scrape coordinates from NHL API')
-                event_coords = scrape_api_events(game_id, drop_description=True)
+                if verbose:
+                    print('Attempting to scrape coordinates from NHL API')
+                event_coords = scrape_api_events(game_id, drop_description=True, verbose=verbose)
                 api_duration = time.time() - api_start
-                try:
-                    print(f'⏱️ API events took: {api_duration:.2f}s')
-                except Exception:
-                    pass
+                if verbose:
+                    try:
+                        print(f'⏱️ API events took: {api_duration:.2f}s')
+                    except Exception:
+                        pass
                 
                 # Set coordinate_source on event_coords before merging (needed for fix_missing)
                 event_coords['coordinate_source'] = 'api'
@@ -2327,14 +2343,16 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                 
                 # TIME: Merge Events
                 merge_start = time.time()
-                print('Attempting to merge events')
+                if verbose:
+                    print('Attempting to merge events')
                 events = single.merge(event_coords, on = ['event_player_1', 'game_seconds', 'version', 'period', 'game_id', 'event'], how = 'left')
                 merge_duration = time.time() - merge_start
-                print(f'Merged events, we have this many rows: {len(events)}')
-                try:
-                    print(f'⏱️ Merge took: {merge_duration:.2f}s')
-                except Exception:
-                    pass
+                if verbose:
+                    print(f'Merged events, we have this many rows: {len(events)}')
+                    try:
+                        print(f'⏱️ Merge took: {merge_duration:.2f}s')
+                    except Exception:
+                        pass
                 
 
                 
@@ -2343,35 +2361,41 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     fix_start = time.time()
                     events = fix_missing(single, event_coords, events)
                     fix_duration = time.time() - fix_start
-                    try:
-                        print(f'⏱️ Fix missing took: {fix_duration:.2f}s')
-                    except Exception:
-                        pass
+                    if verbose:
+                        try:
+                            print(f'⏱️ Fix missing took: {fix_duration:.2f}s')
+                        except Exception:
+                            pass
                 except IndexError as e:
                     print('Issue when fixing problematic events. Here it is: ' + str(e))
                     continue
-                print(pages)
+                if verbose:
+                    print(pages)
                 # TIME: Shifts and Finalize (using pre-fetched pages)
                 try:
-                    print(pages)
+                    if verbose:
+                        print(pages)
                     shifts_start = time.time()
                     if live == True:
                         min_game_clock, shifts = scrape_html_shifts(season, small_id, live, 
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
                                                     summary = pages['summary'],
-                                                    roster_cache = roster_cache)
+                                                    roster_cache = roster_cache,
+                                                    verbose=verbose)
                     else:
                         shifts = scrape_html_shifts(season, small_id, live, 
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
                                                     summary = pages['summary'],
-                                                    roster_cache = roster_cache)
+                                                    roster_cache = roster_cache,
+                                                    verbose=verbose)
                     shifts_duration = time.time() - shifts_start
-                    try:
-                        print(f'⏱️ HTML shifts processing took: {shifts_duration:.2f}s')
-                    except Exception:
-                        pass
+                    if verbose:
+                        try:
+                            print(f'⏱️ HTML shifts processing took: {shifts_duration:.2f}s')
+                        except Exception:
+                            pass
                     
                     prepare_start = time.time()
                     finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
@@ -2379,10 +2403,11 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         if min_game_clock is not None:
                             finalized = finalized[finalized.game_seconds <= min_game_clock]
                     prepare_duration = time.time() - prepare_start
-                    try:
-                        print(f'⏱️ Merge and prepare took: {prepare_duration:.2f}s')
-                    except Exception:
-                        pass
+                    if verbose:
+                        try:
+                            print(f'⏱️ Merge and prepare took: {prepare_duration:.2f}s')
+                        except Exception:
+                            pass
                     
                     full_list.append(finalized)
                     second_time = time.time()
@@ -2446,7 +2471,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                 # Safely format timing string, handling potentially undefined variables
                 try:
                     timing_parts = []
-                    timing_parts.append(f"⏱️ TOTAL game scrape: {total_duration:.2f}s")
                     if 'parallel_duration' in locals(): timing_parts.append(f"Parallel fetch: {parallel_duration:.2f}s")
                     if 'html_duration' in locals(): timing_parts.append(f"HTML processing: {html_duration:.2f}s")
                     if 'api_duration' in locals(): timing_parts.append(f"API processing: {api_duration:.2f}s")
@@ -2454,8 +2478,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     if 'fix_duration' in locals(): timing_parts.append(f"Fix missing: {fix_duration:.2f}s")
                     if 'shifts_duration' in locals(): timing_parts.append(f"Shifts: {shifts_duration:.2f}s")
                     if 'prepare_duration' in locals(): timing_parts.append(f"Merge/prepare: {prepare_duration:.2f}s")
-                    if len(timing_parts) > 1:
-                        print(" (" + ", ".join(timing_parts[1:]) + ")")
+                    if len(timing_parts) > 0:
+                        print("(" + ", ".join(timing_parts) + ")")
                     else:
                         print(f"⏱️ TOTAL game scrape: {total_duration:.2f}s")
                 except Exception:
@@ -2490,16 +2514,21 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             espn_home_team = 'SJS'
                         if away_team == 'S.J':
                             espn_away_team = 'SJS'
-                        print('Scraping ESPN IDs')
+                        if verbose:
+                            print('Scraping ESPN IDs')
                         espn_id = scrape_espn_ids_single_game(str(game_date.date()), espn_home_team, espn_away_team).espn_id.iloc[0]
-                        print('Scraping ESPN Events')
-                        print('Here is the ESPN ID:', espn_id)
+                        if verbose:
+                            print('Scraping ESPN Events')
+                            print('Here is the ESPN ID:', espn_id)
                         event_coords = scrape_espn_events(int(espn_id))
-                        print('Scraped ESPN Events, we have this many rows:', len(event_coords))
+                        if verbose:
+                            print('Scraped ESPN Events, we have this many rows:', len(event_coords))
                         event_coords['coordinate_source'] = 'espn'
-                        print('Attempting to merge events')
+                        if verbose:
+                            print('Attempting to merge events')
                         events = single.merge(event_coords, on = ['event_player_1', 'game_seconds', 'period', 'version', 'event'], how = 'left').drop(columns = ['espn_id'])
-                        print('Merged events, we have this many rows:', len(events))
+                        if verbose:
+                            print('Merged events, we have this many rows:', len(events))
                         try:
                             events = fix_missing(single, event_coords, events)
                         except IndexError as e:
@@ -2513,7 +2542,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
                                                     summary = pages['summary'],
-                                                    roster_cache = roster_cache)
+                                                    roster_cache = roster_cache,
+                                                    verbose=verbose)
                         finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                         full_list.append(finalized)
                         second_time = time.time()
@@ -2568,13 +2598,24 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 }
                             })
                     second_time = time.time()
+                    total_duration = second_time - first_time
                     # Fix this so it doesn't say sourced from ESPN if no coords.
                     if single.equals(events):
-                        print("This game took " + str(round(second_time - first_time, 2)) + " seconds.")
+                        if verbose:
+                            print("This game took " + str(round(total_duration, 2)) + " seconds.")
                         i = i + 1
                     else:
                         print('Successfully scraped ' + str(game_id) + '. Coordinates sourced from ESPN.')
-                        print("This game took " + str(round(second_time - first_time, 2)) + " seconds.")
+                        try:
+                            timing_parts = []
+                            if 'parallel_duration' in locals(): timing_parts.append(f"Parallel fetch: {parallel_duration:.2f}s")
+                            if 'html_duration' in locals(): timing_parts.append(f"HTML processing: {html_duration:.2f}s")
+                            if len(timing_parts) > 0:
+                                print("(" + ", ".join(timing_parts) + ")")
+                            else:
+                                print(f"⏱️ TOTAL game scrape: {total_duration:.2f}s")
+                        except Exception:
+                            print(f"⏱️ TOTAL game scrape: {total_duration:.2f}s")
                         i = i + 1
                     
                     # If there are issues with ESPN
@@ -2728,7 +2769,8 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                                     home_page=pages['home_shifts'],
                                                     away_page=pages['away_shifts'],
                                                     summary = pages['summary'],
-                                                    roster_cache = roster_cache)
+                                                    roster_cache = roster_cache,
+                                                    verbose=verbose)
                         finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                         full_list.append(finalized)
                         second_time = time.time()
@@ -2782,9 +2824,19 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 }
                             })
                     second_time = time.time()
+                    total_duration = second_time - first_time
                     # Fix this so it doesn't say sourced from ESPN if no coords.
                     print('Successfully scraped ' + str(game_id) + '. Coordinates sourced from ESPN.')
-                    print("This game took " + str(round(second_time - first_time, 2)) + " seconds.")
+                    try:
+                        timing_parts = []
+                        if 'parallel_duration' in locals(): timing_parts.append(f"Parallel fetch: {parallel_duration:.2f}s")
+                        if 'html_duration' in locals(): timing_parts.append(f"HTML processing: {html_duration:.2f}s")
+                        if len(timing_parts) > 0:
+                            print("(" + ", ".join(timing_parts) + ")")
+                        else:
+                            print(f"⏱️ TOTAL game scrape: {total_duration:.2f}s")
+                    except Exception:
+                        print(f"⏱️ TOTAL game scrape: {total_duration:.2f}s")
                     i = i + 1
                     
                     # If there are issues with ESPN
@@ -3148,12 +3200,12 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
         return {'final': full, 'intermediates': intermediates_list}
     return full
 
-def full_scrape(game_id_list, live = True, shift = False, return_intermediates = False):
+def full_scrape(game_id_list, live = True, shift = False, return_intermediates = False, verbose = False):
     
     global hidden_patrick
     hidden_patrick = 0
     
-    result = full_scrape_1by1(game_id_list, live, shift_to_espn = shift, return_intermediates = return_intermediates)
+    result = full_scrape_1by1(game_id_list, live, shift_to_espn = shift, return_intermediates = return_intermediates, verbose = verbose)
     
     # Handle return_intermediates case
     if return_intermediates:
@@ -3206,9 +3258,9 @@ def full_scrape(game_id_list, live = True, shift = False, return_intermediates =
         gids = list(set(df.game_id))
         missing = [x for x in game_id_list if x not in gids]
         if len(missing)>0:
-            print('You missed the following games: ' + str(missing))
-            print('Let us try scraping each of them one more time.')
-            retry_result = full_scrape_1by1(missing, return_intermediates = return_intermediates)
+                        print('You missed the following games: ' + str(missing))
+                        print('Let us try scraping each of them one more time.')
+                        retry_result = full_scrape_1by1(missing, return_intermediates = return_intermediates, verbose = verbose)
             if return_intermediates:
                 retry_df = retry_result['final']
                 retry_intermediates = retry_result['intermediates']

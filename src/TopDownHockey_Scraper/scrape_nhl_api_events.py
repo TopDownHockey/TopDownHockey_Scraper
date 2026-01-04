@@ -100,7 +100,7 @@ def _extract_player_id_from_event(event_details, event_type):
         'SHOT': ['shootingPlayerId', 'scoringPlayerId', 'playerId'],
         'GOAL': ['scoringPlayerId', 'shootingPlayerId', 'playerId'],
         'HIT': ['hittingPlayerId', 'playerId'],
-        'BLOCK': ['shootingPlayerId', 'blockingPlayerId', 'playerId'],  # ESPN shows shooter, not blocker
+        'BLOCK': ['shootingPlayerId', 'playerId'],  # ESPN shows shooter, not blocker
         'GIVE': ['playerId', 'committedByPlayerId'],
         'TAKE': ['playerId', 'takingPlayerId'],
         'MISS': ['shootingPlayerId', 'playerId'],
@@ -127,7 +127,7 @@ def _extract_player_id_from_event(event_details, event_type):
     
     return None
 
-def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
+def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbose=False):
     """
     Scrape event coordinates and data from NHL API play-by-play endpoint.
     
@@ -141,12 +141,15 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
         Whether to drop the description column from the output
     shift_to_espn : bool, default False
         If True, raises KeyError to trigger ESPN fallback (for compatibility)
+    verbose : bool, default False
+        If True, print detailed timing information
     
     Returns:
     --------
     pd.DataFrame
         DataFrame with columns: coords_x, coords_y, event_player_1, event, 
-        game_seconds, period, version (and optionally description)
+        game_seconds, period, version, goalie_id, goalie_name 
+        (and optionally description)
     """
     
     if shift_to_espn:
@@ -160,7 +163,8 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
         net_start = time.time()
         response = _session.get(api_url, timeout=30)
         net_duration = time.time() - net_start
-        print(f'  ⏱️ API events network request: {net_duration:.2f}s')
+        if verbose:
+            print(f'  ⏱️ API events network request: {net_duration:.2f}s')
         
         response.raise_for_status()
         
@@ -174,7 +178,8 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
         # Create dictionary mapping player ID to name for fast lookup
         player_mapping_dict = dict(zip(player_mapping_df['id'].astype(str), player_mapping_df['player']))
         parse_duration = time.time() - parse_start
-        print(f'  ⏱️ API JSON parsing: {parse_duration:.2f}s')
+        if verbose:
+            print(f'  ⏱️ API JSON parsing: {parse_duration:.2f}s')
     except Exception as e:
         raise KeyError(f"Failed to fetch NHL API data for game {game_id}: {e}")
     
@@ -186,7 +191,7 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
     
     if not plays:
         # Return empty DataFrame with correct columns
-        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version']
+        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name']
         if not drop_description:
             columns.append('description')
         return pd.DataFrame(columns=columns)
@@ -245,6 +250,10 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
         player_id = _extract_player_id_from_event(details, event_code)
         player_name = _get_player_name(player_id, player_mapping_dict) if player_id else None
         
+        # Extract goalie ID and map to name
+        goalie_id = details.get('goalieInNetId')
+        goalie_name = _get_player_name(goalie_id, player_mapping_dict) if goalie_id else None
+        
         # Extract description
         description = play.get('description', {})
         if isinstance(description, dict):
@@ -265,11 +274,13 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
                 'description': description,
                 'time_in_period': time_in_period,
                 'player_id': player_id,
+                'goalie_id': goalie_id,
+                'goalie_name': goalie_name,
             })
     
     if not events_list:
         # Return empty DataFrame with correct columns
-        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version']
+        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name']
         if not drop_description:
             columns.append('description')
         return pd.DataFrame(columns=columns)
@@ -283,6 +294,7 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
     
     # Normalize player names
     events_df['event_player_1'] = events_df['event_player_1'].apply(normalize_player_name)
+    events_df['goalie_name'] = events_df['goalie_name'].apply(normalize_player_name)
     
     # Filter again after normalization (in case normalization resulted in empty strings)
     events_df = events_df[events_df['event_player_1'] != '']
@@ -340,7 +352,7 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False):
     events_df['coords_y'] = np.where(events_df['coords_y'] < -42, -42, events_df['coords_y'])
     
     # Select final columns (matching ESPN column order)
-    final_columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version']
+    final_columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name']
     if not drop_description:
         final_columns.append('description')
     
