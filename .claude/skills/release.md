@@ -6,7 +6,7 @@ Create a new GitHub release for TopDownHockey_Scraper.
 
 When the user invokes `/release`, follow these steps:
 
-1. **Read the current version** from `setup.py` (look for the `version="X.Y.Z"` line)
+1. **Read the current version** from `setup.py` and `setup.cfg` (look for the `version="X.Y.Z"` and `version = "X.Y.Z"` lines)
 
 2. **Check git status** to ensure working directory is clean (no uncommitted changes)
 
