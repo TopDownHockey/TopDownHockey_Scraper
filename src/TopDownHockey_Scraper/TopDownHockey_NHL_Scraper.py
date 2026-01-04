@@ -3258,9 +3258,9 @@ def full_scrape(game_id_list, live = True, shift = False, return_intermediates =
         gids = list(set(df.game_id))
         missing = [x for x in game_id_list if x not in gids]
         if len(missing)>0:
-                        print('You missed the following games: ' + str(missing))
-                        print('Let us try scraping each of them one more time.')
-                        retry_result = full_scrape_1by1(missing, return_intermediates = return_intermediates, verbose = verbose)
+            print('You missed the following games: ' + str(missing))
+            print('Let us try scraping each of them one more time.')
+            retry_result = full_scrape_1by1(missing, return_intermediates = return_intermediates, verbose = verbose)
             if return_intermediates:
                 retry_df = retry_result['final']
                 retry_intermediates = retry_result['intermediates']
