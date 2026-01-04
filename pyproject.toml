@@ -4,3 +4,10 @@ requires = [
     "wheel"
 ]
 build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
