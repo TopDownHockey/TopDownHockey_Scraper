@@ -1,3 +1,13 @@
+# Claude Code local settings (keep skills, ignore local config)
+.claude/settings.local.json
+
+# Secrets and credentials (never commit these)
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+
 # Build artifacts
 dist/
 build/
