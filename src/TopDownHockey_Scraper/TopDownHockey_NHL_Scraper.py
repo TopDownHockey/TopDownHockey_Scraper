@@ -2100,8 +2100,8 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
         'home_on_6', 'home_on_7', 'home_on_8', 'home_on_9', 'away_on_1', 'away_on_2', 'away_on_3',
         'away_on_4', 'away_on_5', 'away_on_6', 'away_on_7', 'away_on_8', 'away_on_9', 'home_goalie',
         'away_goalie', 'home_team', 'away_team', 'home_skaters', 'away_skaters',
-        'home_score', 'away_score', 'game_score_state', 'game_strength_state', 'coordinate_source']
-        
+        'home_score', 'away_score', 'game_score_state', 'game_strength_state', 'coordinate_source', 'miss_reason']
+
     else:
         
         columns = ['season', 'game_id', 'game_date', 'event_index',

@@ -11,11 +11,63 @@ import json
 import re
 import unicodedata
 import time
+import os
 
 # Use the same session pattern as the main scraper
 _session = requests.Session()
 
 from TopDownHockey_Scraper.name_corrections import NAME_CORRECTIONS, normalize_player_name
+
+# Load packaged handedness data
+_handedness_dict = {}
+_handedness_api_cache = {}  # Cache for API lookups during session
+
+def _load_handedness_data():
+    """Load handedness data from packaged CSV file"""
+    global _handedness_dict
+    try:
+        # Try importlib.resources first (Python 3.9+)
+        try:
+            from importlib.resources import files
+            data_path = files('TopDownHockey_Scraper').joinpath('data', 'handedness.csv')
+            with data_path.open('r') as f:
+                df = pd.read_csv(f)
+        except (ImportError, TypeError):
+            # Fallback for older Python versions
+            import pkg_resources
+            data_path = pkg_resources.resource_filename('TopDownHockey_Scraper', 'data/handedness.csv')
+            df = pd.read_csv(data_path)
+
+        _handedness_dict = dict(zip(df['player'], df['handedness']))
+    except Exception as e:
+        # If data file not found, continue without it (API fallback will be used)
+        _handedness_dict = {}
+
+# Load on module import
+_load_handedness_data()
+
+def _get_handedness_from_api(player_id):
+    """Fetch player handedness from NHL API (with session caching)"""
+    if player_id is None:
+        return None
+
+    player_id_str = str(int(player_id))
+
+    # Check session cache first
+    if player_id_str in _handedness_api_cache:
+        return _handedness_api_cache[player_id_str]
+
+    try:
+        url = f"https://api-web.nhle.com/v1/player/{player_id_str}/landing"
+        response = _session.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        handedness = data.get('shootsCatches')
+        _handedness_api_cache[player_id_str] = handedness
+        return handedness
+    except Exception:
+        _handedness_api_cache[player_id_str] = None
+        return None
 
 def _get_player_name(player_id, player_mapping_dict):
     """Get player name from ID using player mapping dictionary from API"""
@@ -191,11 +243,11 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
     
     if not plays:
         # Return empty DataFrame with correct columns
-        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name']
+        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name', 'miss_reason', 'shooter_handedness']
         if not drop_description:
             columns.append('description')
         return pd.DataFrame(columns=columns)
-    
+
     # Parse plays into list of dictionaries
     events_list = []
     
@@ -253,7 +305,10 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
         # Extract goalie ID and map to name
         goalie_id = details.get('goalieInNetId')
         goalie_name = _get_player_name(goalie_id, player_mapping_dict) if goalie_id else None
-        
+
+        # Extract miss reason (only present for missed shots)
+        miss_reason = details.get('reason')
+
         # Extract description
         description = play.get('description', {})
         if isinstance(description, dict):
@@ -276,15 +331,16 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
                 'player_id': player_id,
                 'goalie_id': goalie_id,
                 'goalie_name': goalie_name,
+                'miss_reason': miss_reason,
             })
     
     if not events_list:
         # Return empty DataFrame with correct columns
-        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name']
+        columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name', 'miss_reason', 'shooter_handedness']
         if not drop_description:
             columns.append('description')
         return pd.DataFrame(columns=columns)
-    
+
     # Convert to DataFrame
     events_df = pd.DataFrame(events_list)
     
@@ -298,7 +354,18 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
     
     # Filter again after normalization (in case normalization resulted in empty strings)
     events_df = events_df[events_df['event_player_1'] != '']
-    
+
+    # Add shooter handedness from packaged data, with API fallback for unknowns
+    def get_handedness(row):
+        # Try packaged data first (fast)
+        player_name = row['event_player_1']
+        if player_name in _handedness_dict:
+            return _handedness_dict[player_name]
+        # Fall back to NHL API for unknown players (slow, but cached)
+        return _get_handedness_from_api(row.get('player_id'))
+
+    events_df['shooter_handedness'] = events_df.apply(get_handedness, axis=1)
+
     # Calculate priority for sorting (matching ESPN function)
     events_df['priority'] = np.where(
         events_df['event'].isin(['TAKE', 'GIVE', 'MISS', 'HIT', 'SHOT', 'BLOCK']), 1,
@@ -352,10 +419,10 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
     events_df['coords_y'] = np.where(events_df['coords_y'] < -42, -42, events_df['coords_y'])
     
     # Select final columns (matching ESPN column order)
-    final_columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name']
+    final_columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name', 'miss_reason', 'shooter_handedness']
     if not drop_description:
         final_columns.append('description')
-    
+
     events_df = events_df[final_columns]
     
     return events_df

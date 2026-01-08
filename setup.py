@@ -7,7 +7,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="TopDownHockey_Scraper", # Replace with your own username
-    version="6.1.25",
+    version="6.1.26",
     author="Patrick Bacon",
     author_email="patrick.s.bacon@gmail.com",
     description="The TopDownHockey Scraper",
@@ -26,7 +26,7 @@ setup(
     package_dir={"": "src"},
     packages=['TopDownHockey_Scraper'],
     package_data={
-        'TopDownHockey_Scraper': ['portrait_links.csv'],
+        'TopDownHockey_Scraper': ['portrait_links.csv', 'data/handedness.csv'],
     },
     include_package_data=True,
     python_requires=">=3.6",
