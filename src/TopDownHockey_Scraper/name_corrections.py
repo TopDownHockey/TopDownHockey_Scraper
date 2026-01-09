@@ -287,16 +287,16 @@ def normalize_player_name(name):
     name = unicodedata.normalize('NFKD', name).encode('ascii', errors='ignore').decode('utf-8')
     name = name.upper()
     
+    # Clean up multiple spaces BEFORE name corrections lookup
+    name = re.sub(r' +', ' ', name)
+
     # Common name replacements
     name = name.replace('ALEXANDRE ', 'ALEX ')
     name = name.replace('ALEXANDER ', 'ALEX ')
     name = name.replace('CHRISTOPHER ', 'CHRIS ')
 
     name_corrections = NAME_CORRECTIONS
-    
+
     name = name_corrections.get(name, name)
-    
-    # Clean up multiple spaces
-    name = re.sub(r' +', ' ', name)
     
     return name.strip()

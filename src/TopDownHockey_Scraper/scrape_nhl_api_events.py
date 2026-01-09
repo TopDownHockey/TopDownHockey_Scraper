@@ -227,6 +227,15 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
         player_mapping_df = player_mapping_df.assign(player = (player_mapping_df['firstName'].apply(lambda x: x['default']) + ' ' + player_mapping_df['lastName'].apply(lambda x: x['default'])).str.upper(),
                       link = 'https://assets.nhle.com/mugs/nhl/latest/' + player_mapping_df['playerId'].astype(str) + '.png',
                       id = player_mapping_df['playerId']).loc[:, ['player', 'link', 'id']]
+
+        # Disambiguate players with identical names using their NHL API IDs
+        # ELIAS PETTERSSON (D) - defenseman, ID 8483678 - vs forward ELIAS PETTERSSON
+        player_mapping_df['player'] = np.where(
+            player_mapping_df['id'] == 8483678,
+            'ELIAS PETTERSSON(D)',
+            player_mapping_df['player']
+        )
+
         # Create dictionary mapping player ID to name for fast lookup
         player_mapping_dict = dict(zip(player_mapping_df['id'].astype(str), player_mapping_df['player']))
         parse_duration = time.time() - parse_start
