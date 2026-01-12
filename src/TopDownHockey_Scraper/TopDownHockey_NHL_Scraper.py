@@ -3215,7 +3215,8 @@ def full_scrape(game_id_list, live = True, shift = False, return_intermediates =
         df = result
         intermediates_list = None
     
-    print('Full scrape complete, we have this many rows:', len(df))
+    if verbose:
+        print('Full scrape complete, we have this many rows:', len(df))
 
     try:
         df = df.assign(
