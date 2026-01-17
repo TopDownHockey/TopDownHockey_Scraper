@@ -540,10 +540,11 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
+    # FIX: Use .text instead of .content to handle charset mismatch (HTML declares UTF-16 but is UTF-8)
     if type(home_page) == str:
         home_soup = BeautifulSoup(home_page)
     else:
-        home_soup = BeautifulSoup(home_page.content, 'lxml')
+        home_soup = BeautifulSoup(home_page.text, 'lxml')
     found = home_soup.find_all('td', {'class':['playerHeading + border', 'lborder + bborder']})
     if len(found)==0:
         raise IndexError('This game has no shift data.')
@@ -745,10 +746,11 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
+    # FIX: Use .text instead of .content to handle charset mismatch (HTML declares UTF-16 but is UTF-8)
     if type(away_page) == str:
         away_soup = BeautifulSoup(away_page)
     else:
-        away_soup = BeautifulSoup(away_page.content, 'lxml')
+        away_soup = BeautifulSoup(away_page.text, 'lxml')
     found = away_soup.find_all('td', {'class':['playerHeading + border', 'lborder + bborder']})
     if len(found)==0:
         raise IndexError('This game has no shift data.')

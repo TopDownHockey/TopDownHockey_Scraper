@@ -236,6 +236,12 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
             player_mapping_df['player']
         )
 
+        player_mapping_df['player'] = np.where(
+            player_mapping_df['id'] == 8480222,
+            'SEBASTIAN AHO SWE',
+            player_mapping_df['player']
+        )
+
         # Create dictionary mapping player ID to name for fast lookup
         player_mapping_dict = dict(zip(player_mapping_df['id'].astype(str), player_mapping_df['player']))
         parse_duration = time.time() - parse_start
@@ -428,7 +434,8 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
     events_df['coords_y'] = np.where(events_df['coords_y'] < -42, -42, events_df['coords_y'])
     
     # Select final columns (matching ESPN column order)
-    final_columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name', 'miss_reason', 'shooter_handedness']
+    # player_id is kept for fallback merge when name matching fails
+    final_columns = ['coords_x', 'coords_y', 'event_player_1', 'event', 'game_seconds', 'period', 'version', 'goalie_id', 'goalie_name', 'miss_reason', 'shooter_handedness', 'player_id']
     if not drop_description:
         final_columns.append('description')
 
