@@ -662,7 +662,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             goalie_summary = parse_goaltender_summary(goalie_table)
 
-            goalie_summary = goalie_summary[(goalie_summary.team==thisteam) & ~(pd.isna(goalie_summary['TOI']))]
+            goalie_summary = goalie_summary[((goalie_summary.team==thisteam) | (('CANADIENS' in thisteam) & (goalie_summary.team.str.contains('CANADIENS')))) & ~(pd.isna(goalie_summary['TOI']))]
 
             goalie_summary = goalie_summary.assign(name = 
                 goalie_summary.name.str.split(', ').str[-1] + ' ' + goalie_summary.name.str.split(', ').str[0]
@@ -867,7 +867,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             goalie_summary = parse_goaltender_summary(goalie_table)
 
-            goalie_summary = goalie_summary[(goalie_summary.team==thisteam) & ~(pd.isna(goalie_summary['TOI']))]
+            goalie_summary = goalie_summary[((goalie_summary.team==thisteam) | (('CANADIENS' in thisteam) & (goalie_summary.team.str.contains('CANADIENS')))) & ~(pd.isna(goalie_summary['TOI']))]
 
             goalie_summary = goalie_summary.assign(name = 
                 goalie_summary.name.str.split(', ').str[-1] + ' ' + goalie_summary.name.str.split(', ').str[0]
@@ -945,6 +945,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             away_clock_time_now = None
         
     global all_shifts
+
+    home_shifts = home_shifts[~home_shifts.duration.str.startswith('-')]
+    away_shifts = away_shifts[~away_shifts.duration.str.startswith('-')]
     
     all_shifts = pd.concat([home_shifts, away_shifts])
 
