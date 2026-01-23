@@ -294,6 +294,9 @@ def parse_goaltender_summary(goalie_table):
             # Extract team name
             if first_cell_text and first_cell_text not in ['TOI', 'GOALS-SHOTS AGAINST', 'EV', 'PP', 'SH', 'TOT', '1', '2', '3']:
                 current_team = first_cell_text
+                # Normalize Montreal team name (handles encoding issues from ISO-8859-1 vs UTF-8)
+                if 'MONTR' in current_team and 'CANAD' in current_team:
+                    current_team = 'MONTREAL CANADIENS'
             continue
         
         # Skip subheader rows (EV, PP, SH, etc.)
@@ -548,6 +551,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     if len(found)==0:
         raise IndexError('This game has no shift data.')
     thisteam = home_soup.find('td', {'align':'center', 'class':'teamHeading + border'}).get_text()
+    # Normalize Montreal team name (handles encoding issues)
+    if 'MONTR' in thisteam and 'CANAD' in thisteam:
+        thisteam = 'MONTREAL CANADIENS'
 
     players = dict()
 
@@ -598,6 +604,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         if len(found)==0:
             raise IndexError('This game has no shift data.')
         thisteam = home_soup.find('td', {'align':'center', 'class':'teamHeading + border'}).get_text()
+        # Normalize Montreal team name (handles encoding issues)
+        if 'MONTR' in thisteam and 'CANAD' in thisteam:
+            thisteam = 'MONTREAL CANADIENS'
 
         players = dict()
 
