@@ -46,6 +46,45 @@ _MULTI_SPACE_PATTERN = re.compile(r' +')
 _CAPTAIN_A_PATTERN = re.compile(r' \(A\)$')
 _CAPTAIN_C_PATTERN = re.compile(r' \(C\)$')
 
+# ========== DEBUG LOGGING HELPER ==========
+def _log_exception_with_dataframe(error, context_name, dataframes_dict=None, max_rows=100):
+    """
+    Log an exception with full context including relevant dataframes.
+
+    Args:
+        error: The exception that was raised
+        context_name: String describing where the error occurred (e.g., 'scrape_html_shifts')
+        dataframes_dict: Dict of {name: dataframe} to print for debugging
+        max_rows: Maximum rows to print per dataframe (default 100)
+    """
+    print(f"\n{'='*60}")
+    print(f"EXCEPTION in {context_name}")
+    print(f"{'='*60}")
+    print(f"Error type: {type(error).__name__}")
+    print(f"Error message: {str(error)}")
+    print(f"\nFull traceback:")
+    traceback.print_exc()
+
+    if dataframes_dict:
+        for df_name, df in dataframes_dict.items():
+            if df is not None and isinstance(df, pd.DataFrame):
+                print(f"\n{'-'*40}")
+                print(f"DataFrame: {df_name}")
+                print(f"Shape: {df.shape}")
+                print(f"Columns: {list(df.columns)}")
+                print(f"Index: {df.index}")
+                print(f"Dtypes:\n{df.dtypes}")
+                if len(df) <= max_rows:
+                    print(f"\nFull data:\n{df.to_string()}")
+                else:
+                    print(f"\nFirst {max_rows} rows:\n{df.head(max_rows).to_string()}")
+            elif df is not None:
+                print(f"\n{'-'*40}")
+                print(f"Variable: {df_name}")
+                print(f"Type: {type(df)}")
+                print(f"Value: {df}")
+    print(f"{'='*60}\n")
+
 # ========== PARALLEL FETCHING HELPERS ==========
 def _fetch_url(url, max_retries=3, base_delay=2, **kwargs):
     """
@@ -703,7 +742,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             home_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
-            home_clock_period = max(home_shifts.period.astype(int))
+            home_clock_period = max(home_shifts.period.replace('OT', 4).astype(int))
 
             start_times_seconds = home_clock_time_now
 
@@ -908,7 +947,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             away_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
-            away_clock_period = max(away_shifts.period.astype(int))
+            away_clock_period = max(away_shifts.period.replace('OT', 4).astype(int))
 
             start_times_seconds = away_clock_time_now
 
@@ -1042,11 +1081,14 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             return '20:00'
     
     try:
+        # Reset index to avoid "cannot reindex on an axis with duplicate labels" error
+        all_shifts = all_shifts.reset_index(drop=True)
         all_shifts['start_time'] = all_shifts['start_time'].apply(clean_time_value)
         all_shifts['end_time'] = all_shifts['end_time'].apply(clean_time_value)
     except Exception as e:
-        print(f'Error cleaning time values: {e}')
-        print('Stupid vibe coded system is causing problems')
+        _log_exception_with_dataframe(e, 'scrape_html_shifts.clean_time_value', {
+            'all_shifts': all_shifts
+        })
     
     all_shifts = all_shifts.assign(end_time = np.where(pd.to_datetime(all_shifts.start_time).dt.time > pd.to_datetime(all_shifts.end_time).dt.time, '20:00', all_shifts.end_time),
                                   goalie = np.where(all_shifts.name.isin(goalie_names), 1, 0))
@@ -2517,7 +2559,11 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         except Exception:
                             pass
                 except IndexError as e:
-                    print('Issue when fixing problematic events. Here it is: ' + str(e))
+                    _log_exception_with_dataframe(e, 'full_scrape_1by1.fix_missing', {
+                        'single': single if 'single' in locals() else None,
+                        'event_coords': event_coords if 'event_coords' in locals() else None,
+                        'events': events if 'events' in locals() else None
+                    })
                     continue
                 if verbose:
                     print(pages)
@@ -2572,16 +2618,13 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'coordinate_source': 'api',
                             'warning': None,
                             'error': None,
-                            'raw_html': {
-                                'events': pages.get('events'),
-                                'roster': pages.get('roster'),
-                                'home_shifts': pages.get('home_shifts'),
-                                'away_shifts': pages.get('away_shifts'),
-                                'summary': pages.get('summary')
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                 except IndexError as e:
-                    print('There was no shift data for this game. Error: ' + str(e))
+                    _log_exception_with_dataframe(e, 'full_scrape_1by1.scrape_html_shifts', {
+                        'events': events if 'events' in locals() else None,
+                        'shifts': shifts if 'shifts' in locals() else None
+                    })
                     fixed_events = events
                     fixed_events = fixed_events.rename(
                     columns = {'period':'game_period', 'event':'event_type', 'away_team_abbreviated':'away_team', 
@@ -2603,13 +2646,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'coordinate_source': 'api',
                             'warning': 'NO SHIFT DATA.',
                             'error': None,
-                            'raw_html': {
-                                'events': pages.get('events'),
-                                'roster': pages.get('roster'),
-                                'home_shifts': pages.get('home_shifts'),
-                                'away_shifts': pages.get('away_shifts'),
-                                'summary': pages.get('summary')
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                 
                 try:
@@ -2709,13 +2746,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'coordinate_source': 'espn',
                                 'warning': None,
                                 'error': None,
-                                'raw_html': {
-                                    'events': pages.get('events'),
-                                    'roster': pages.get('roster'),
-                                    'home_shifts': pages.get('home_shifts'),
-                                    'away_shifts': pages.get('away_shifts'),
-                                    'summary': pages.get('summary')
-                                }
+                                'raw_html': None  # Don't store Response objects - they hold connections open
                             })
                     except IndexError as e:
                         print('There was no shift data for this game. Error: ' + str(e))
@@ -2740,13 +2771,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'coordinate_source': 'espn',
                                 'warning': 'NO SHIFT DATA',
                                 'error': None,
-                                'raw_html': {
-                                    'events': pages.get('events'),
-                                    'roster': pages.get('roster'),
-                                    'home_shifts': pages.get('home_shifts'),
-                                    'away_shifts': pages.get('away_shifts'),
-                                    'summary': pages.get('summary')
-                                }
+                                'raw_html': None  # Don't store Response objects - they hold connections open
                             })
                     second_time = time.time()
                     total_duration = second_time - first_time
@@ -2787,13 +2812,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN KeyError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -2811,13 +2830,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN IndexError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -2835,13 +2848,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN TypeError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -2859,13 +2866,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN ExpatError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -2942,13 +2943,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'coordinate_source': coord_source_for_intermediates,
                                 'warning': None,
                                 'error': None,
-                                'raw_html': {
-                                    'events': pages.get('events'),
-                                    'roster': pages.get('roster'),
-                                    'home_shifts': pages.get('home_shifts'),
-                                    'away_shifts': pages.get('away_shifts'),
-                                    'summary': pages.get('summary')
-                                }
+                                'raw_html': None  # Don't store Response objects - they hold connections open
                             })
                     except IndexError as e:
                         print('There was no shift data for this game. Error: ' + str(e))
@@ -2972,13 +2967,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'coordinate_source': coord_source_for_intermediates,
                                 'warning': 'NO SHIFT DATA',
                                 'error': None,
-                                'raw_html': {
-                                    'events': pages.get('events'),
-                                    'roster': pages.get('roster'),
-                                    'home_shifts': pages.get('home_shifts'),
-                                    'away_shifts': pages.get('away_shifts'),
-                                    'summary': pages.get('summary')
-                                }
+                                'raw_html': None  # Don't store Response objects - they hold connections open
                             })
                     second_time = time.time()
                     total_duration = second_time - first_time
@@ -3012,13 +3001,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN Hybrid KeyError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -3036,13 +3019,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN Hybrid IndexError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -3060,13 +3037,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN Hybrid TypeError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -3084,13 +3055,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'warning': None,
                             'error': f'ESPN Hybrid ExpatError: {str(e)}',
                             'error_traceback': traceback.format_exc(),
-                            'raw_html': {
-                                'events': pages.get('events') if 'pages' in locals() else None,
-                                'roster': pages.get('roster') if 'pages' in locals() else None,
-                                'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                                'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                                'summary': pages.get('summary') if 'pages' in locals() else None
-                            }
+                            'raw_html': None  # Don't store Response objects - they hold connections open
                         })
                     i = i + 1
                     retry_count = 0  # Reset for next game
@@ -3108,19 +3073,23 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'warning': None,
                     'error': f'ConnectionError: {str(e)}',
                     'error_traceback': traceback.format_exc(),
-                    'raw_html': {
-                        'events': pages.get('events') if 'pages' in locals() else None,
-                        'roster': pages.get('roster') if 'pages' in locals() else None,
-                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                        'summary': pages.get('summary') if 'pages' in locals() else None
-                    }
+                    'raw_html': None  # Don't store Response objects - they hold connections open
                 })
-            time.sleep(10)
-            continue
+            # Retry with backoff, but don't loop forever
+            if retry_count < MAX_RETRIES:
+                retry_count += 1
+                delay = 10 * retry_count  # 10, 20, 30 seconds
+                print(f"  Retrying {game_id} in {delay} seconds... (attempt {retry_count}/{MAX_RETRIES})")
+                time.sleep(delay)
+                continue  # Retry same game
+            else:
+                print(f"  All {MAX_RETRIES} retries exhausted for {game_id}, skipping.")
+                retry_count = 0  # Reset for next game
+                i = i + 1
+                continue
             
         except ChunkedEncodingError as e:
-            print('Got a Connection Error, time to sleep.')
+            print('Got a ChunkedEncodingError, time to sleep.')
             if return_intermediates:
                 intermediates_list.append({
                     'game_id': game_id if 'game_id' in locals() else game_id_list[i],
@@ -3131,16 +3100,20 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'warning': None,
                     'error': f'ChunkedEncodingError: {str(e)}',
                     'error_traceback': traceback.format_exc(),
-                    'raw_html': {
-                        'events': pages.get('events') if 'pages' in locals() else None,
-                        'roster': pages.get('roster') if 'pages' in locals() else None,
-                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                        'summary': pages.get('summary') if 'pages' in locals() else None
-                    }
+                    'raw_html': None  # Don't store Response objects - they hold connections open
                 })
-            time.sleep(10)
-            continue
+            # Retry with backoff, but don't loop forever
+            if retry_count < MAX_RETRIES:
+                retry_count += 1
+                delay = 10 * retry_count  # 10, 20, 30 seconds
+                print(f"  Retrying {game_id} in {delay} seconds... (attempt {retry_count}/{MAX_RETRIES})")
+                time.sleep(delay)
+                continue  # Retry same game
+            else:
+                print(f"  All {MAX_RETRIES} retries exhausted for {game_id}, skipping.")
+                retry_count = 0  # Reset for next game
+                i = i + 1
+                continue
             
         except AttributeError as e:
             print(str(game_id) + ' does not have an HTML report. Here is the error: ' + str(e))
@@ -3155,13 +3128,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'warning': None,
                     'error': f'AttributeError: {str(e)}',
                     'error_traceback': traceback.format_exc(),
-                    'raw_html': {
-                        'events': pages.get('events') if 'pages' in locals() else None,
-                        'roster': pages.get('roster') if 'pages' in locals() else None,
-                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                        'summary': pages.get('summary') if 'pages' in locals() else None
-                    }
+                    'raw_html': None  # Don't store Response objects - they hold connections open
                 })
             # Retry transient HTML errors with backoff
             if retry_count < MAX_RETRIES:
@@ -3189,13 +3156,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'warning': None,
                     'error': f'IndexError: {str(e)}',
                     'error_traceback': traceback.format_exc(),
-                    'raw_html': {
-                        'events': pages.get('events') if 'pages' in locals() else None,
-                        'roster': pages.get('roster') if 'pages' in locals() else None,
-                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                        'summary': pages.get('summary') if 'pages' in locals() else None
-                    }
+                    'raw_html': None  # Don't store Response objects - they hold connections open
                 })
             i = i + 1
             retry_count = 0  # Reset for next game
@@ -3214,13 +3175,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'warning': None,
                     'error': f'ValueError: {str(e)}',
                     'error_traceback': traceback.format_exc(),
-                    'raw_html': {
-                        'events': pages.get('events') if 'pages' in locals() else None,
-                        'roster': pages.get('roster') if 'pages' in locals() else None,
-                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                        'summary': pages.get('summary') if 'pages' in locals() else None
-                    }
+                    'raw_html': None  # Don't store Response objects - they hold connections open
                 })
             # Retry transient HTML errors with backoff
             if retry_count < MAX_RETRIES:
@@ -3247,13 +3202,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     'warning': None,
                     'error': f'KeyError: {str(k)}',
                     'error_traceback': traceback.format_exc(),
-                    'raw_html': {
-                        'events': pages.get('events') if 'pages' in locals() else None,
-                        'roster': pages.get('roster') if 'pages' in locals() else None,
-                        'home_shifts': pages.get('home_shifts') if 'pages' in locals() else None,
-                        'away_shifts': pages.get('away_shifts') if 'pages' in locals() else None,
-                        'summary': pages.get('summary') if 'pages' in locals() else None
-                    }
+                    'raw_html': None  # Don't store Response objects - they hold connections open
                 })
             i = i + 1
             retry_count = 0  # Reset for next game
@@ -3440,7 +3389,9 @@ def full_scrape(game_id_list, live = True, shift = False, return_intermediates =
                 'ELIAS PETTERSSON(D)', df.event_player_3)
         )
     except Exception as e:
-        print(e)
+        _log_exception_with_dataframe(e, 'full_scrape.pettersson_disambiguation', {
+            'df': df if 'df' in locals() else None
+        })
 
     # Don't even need this, we've had this problem with Stutzle for years, just let it be. 
     # df.event_description = df.event_description.str.replace('FEHÃ\x89RVÃ\x81RY', 'FEHERVARY').str.replace('BLÃMEL', 'BLAMEL')
