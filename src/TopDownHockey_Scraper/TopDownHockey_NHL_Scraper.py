@@ -364,6 +364,159 @@ def parse_goaltender_summary(goalie_table):
     
     return pd.DataFrame(goalie_data)
 
+def backfill_missing_goalie_shifts_from_period_summary(shifts_df, soup, goalie_names, team_name, venue):
+    """
+    Backfill missing goalie shifts for historical games where the NHL shift data
+    has gaps. This parses the per-period summary table and creates synthetic shifts
+    for periods where a goalie has TOI but no individual shifts recorded.
+
+    This addresses a known NHL data quality issue in historical games (pre-2023-24)
+    where goalie shifts are sometimes missing from the detailed shift list but
+    present in the period summary.
+
+    Args:
+        shifts_df: DataFrame of individual shifts already parsed
+        soup: BeautifulSoup object of the HTML shifts page
+        goalie_names: List of goalie names for this team
+        team_name: Team name string
+        venue: 'home' or 'away'
+
+    Returns:
+        Updated shifts_df with backfilled goalie shifts
+    """
+    if len(shifts_df) == 0:
+        return shifts_df
+
+    # Parse the per-period summary data (class 'bborder + lborder +')
+    found = soup.find_all('td', {'class':['playerHeading + border', 'bborder + lborder +']})
+    if len(found) == 0:
+        return shifts_df
+
+    players = dict()
+    current_player = None
+
+    for i in range(len(found)):
+        line = found[i].get_text()
+        if line == '25 PETTERSSON, ELIAS':
+            line = '25 PETTERSSON(D), ELIAS'
+        if ', ' in line:
+            # Player header row
+            name_parts = line.split(',')
+            if len(name_parts) >= 2:
+                number_last = name_parts[0].split(' ', 1)
+                number = number_last[0].strip()
+                last_name = number_last[1].strip() if len(number_last) > 1 else ''
+                first_name = name_parts[1].strip()
+                full_name = first_name + " " + last_name
+                players[full_name] = {
+                    'number': number,
+                    'name': full_name,
+                    'shifts': []
+                }
+                current_player = full_name
+        elif current_player is not None:
+            players[current_player]['shifts'].append(line)
+
+    # Build period summary dataframe
+    period_summary_list = []
+    for key in players.keys():
+        shifts_array = players[key]['shifts']
+        # Per-period summary has 6 columns: period, shifts, avg, TOI, EV Total, PP Total
+        length = int(len(shifts_array) / 6)
+        if length > 0:
+            try:
+                df = pd.DataFrame(np.array(shifts_array).reshape(length, 6)).rename(
+                    columns={0: 'period', 1: 'shifts_count', 2: 'avg', 3: 'TOI', 4: 'EV Total', 5: 'PP Total'})
+                df = df.assign(name=players[key]['name'], number=players[key]['number'])
+                period_summary_list.append(df)
+            except:
+                continue
+
+    if not period_summary_list:
+        return shifts_df
+
+    period_summary = pd.concat(period_summary_list, ignore_index=True)
+
+    # Normalize goalie names for comparison
+    period_summary['name_normalized'] = period_summary.name.str.normalize('NFKD').str.encode('ascii', errors='ignore').str.decode('utf-8').str.upper()
+    goalie_names_normalized = [n.upper() for n in goalie_names]
+
+    # Filter to goalies only
+    goalie_summary = period_summary[period_summary.name_normalized.isin(goalie_names_normalized)].copy()
+
+    if len(goalie_summary) == 0:
+        return shifts_df
+
+    # Filter out TOT row and rows with no TOI
+    goalie_summary = goalie_summary[
+        (goalie_summary.period != 'TOT') &
+        (goalie_summary.TOI.notna()) &
+        (goalie_summary.TOI != '') &
+        (goalie_summary.TOI != '\xa0')
+    ].copy()
+
+    if len(goalie_summary) == 0:
+        return shifts_df
+
+    # Convert period to int for comparison
+    goalie_summary['period_int'] = goalie_summary.period.replace('OT', '4').astype(int)
+
+    # Check which periods are missing individual shifts for each goalie
+    shifts_to_add = []
+
+    for _, row in goalie_summary.iterrows():
+        goalie_name = row['name_normalized']
+        period = row['period_int']
+        toi = row['TOI']
+        number = row['number']
+
+        # Check if this goalie has any individual shifts for this period
+        existing_shifts = shifts_df[
+            (shifts_df.name.str.upper() == goalie_name) &
+            (shifts_df.period.astype(str).replace('OT', '4').astype(int) == period)
+        ]
+
+        if len(existing_shifts) == 0 and toi and toi not in ['', '\xa0']:
+            # No shifts exist but summary shows TOI - need to backfill
+            try:
+                toi_seconds = convert_clock_to_seconds(toi)
+                if toi_seconds > 0:
+                    # Get max shift number for this player
+                    existing_player_shifts = shifts_df[shifts_df.name.str.upper() == goalie_name]
+                    if len(existing_player_shifts) > 0:
+                        max_shift_num = existing_player_shifts.shift_number.astype(int).max()
+                    else:
+                        max_shift_num = 0
+
+                    # Create synthetic shift covering the full period TOI
+                    # For simplicity, assume shift starts at 0:00 and ends at TOI
+                    period_str = 'OT' if period == 4 else str(period)
+                    shift_start = '0:00 / 20:00'
+                    shift_end = f'{toi} / {subtract_from_twenty_minutes(toi)}'
+
+                    shifts_to_add.append({
+                        'shift_number': max_shift_num + 1,
+                        'period': period_str,
+                        'shift_start': shift_start,
+                        'shift_end': shift_end,
+                        'duration': toi,
+                        'name': row['name'],
+                        'number': number,
+                        'team': team_name,
+                        'venue': venue
+                    })
+            except:
+                continue
+
+    if shifts_to_add:
+        new_shifts_df = pd.DataFrame(shifts_to_add)
+        # Ensure column types match
+        new_shifts_df['shift_number'] = new_shifts_df['shift_number'].astype(int)
+        shifts_df = pd.concat([shifts_df, new_shifts_df], ignore_index=True)
+        shifts_df = shifts_df.sort_values(by=['number', 'period', 'shift_number']).reset_index(drop=True)
+
+    return shifts_df
+
 def group_if_not_none(result):
     if result is not None:
         result = result.group()
@@ -582,10 +735,11 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
+    # FIX: Use .text instead of .content to handle charset mismatch (HTML declares UTF-16 but is UTF-8)
     if type(home_page) == str:
         home_soup = BeautifulSoup(home_page)
     else:
-        home_soup = BeautifulSoup(home_page.content, 'lxml')
+        home_soup = BeautifulSoup(home_page.text, 'lxml')
     found = home_soup.find_all('td', {'class':['playerHeading + border', 'lborder + bborder']})
     if len(found)==0:
         raise IndexError('This game has no shift data.')
@@ -793,10 +947,11 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
     # NOTE: Keeping BeautifulSoup for shifts parsing for now due to complex class matching
     # lxml optimization applied to events parsing (major speedup achieved there)
+    # FIX: Use .text instead of .content to handle charset mismatch (HTML declares UTF-16 but is UTF-8)
     if type(away_page) == str:
         away_soup = BeautifulSoup(away_page)
     else:
-        away_soup = BeautifulSoup(away_page.content, 'lxml')
+        away_soup = BeautifulSoup(away_page.text, 'lxml')
     found = away_soup.find_all('td', {'class':['playerHeading + border', 'lborder + bborder']})
     if len(found)==0:
         raise IndexError('This game has no shift data.')
@@ -982,7 +1137,30 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         elif len(shifts_needing_to_be_added) == 0:
             away_clock_period = None
             away_clock_time_now = None
-        
+
+    # Backfill missing goalie shifts for historical seasons (pre-2023-24)
+    # This addresses NHL data quality issues where goalie shifts are missing
+    # from the detailed shift list but present in the period summary
+    if not live and int(season) < 20232024:
+        # Get team names from the parsed data
+        home_team_name = home_soup.find('td', {'align': 'center', 'class': 'teamHeading + border'}).get_text()
+        if 'MONTR' in home_team_name and 'CANAD' in home_team_name:
+            home_team_name = 'MONTREAL CANADIENS'
+
+        away_team_name = away_soup.find('td', {'align': 'center', 'class': 'teamHeading + border'}).get_text()
+        if 'MONTR' in away_team_name and 'CANAD' in away_team_name:
+            away_team_name = 'MONTREAL CANADIENS'
+
+        # Backfill home goalie shifts
+        home_shifts = backfill_missing_goalie_shifts_from_period_summary(
+            home_shifts, home_soup, home_goalie_names, home_team_name, 'home'
+        )
+
+        # Backfill away goalie shifts
+        away_shifts = backfill_missing_goalie_shifts_from_period_summary(
+            away_shifts, away_soup, away_goalie_names, away_team_name, 'away'
+        )
+
     global all_shifts
 
     home_shifts = home_shifts[~home_shifts.duration.str.startswith('-')]
@@ -1053,38 +1231,27 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     
     all_shifts['name'] = all_shifts['name'].str.replace('  ', ' ')
     
-    # Clean invalid time values (e.g., "28:10" should be "20:00")
-    # Times beyond 20:00 (or 5:00 for OT periods) are invalid and should be capped
-    def clean_time_value(time_str):
-        """Clean invalid time values by capping hours at 20 (23 for parsing, but we'll cap at period max)"""
-        if pd.isna(time_str):
-            return time_str
-        try:
-            # Try to parse as-is first
-            pd.to_datetime(time_str)
-            return time_str
-        except:
-            # If parsing fails, extract minutes:seconds and cap appropriately
-            try:
-                parts = str(time_str).split(':')
-                if len(parts) == 2:
-                    minutes = int(parts[0])
-                    seconds = parts[1]
-                    # If minutes >= 20, cap at 20:00 (end of regulation period)
-                    if minutes >= 20:
-                        return '20:00'
-                    else:
-                        return time_str
-            except:
-                pass
-            # If all else fails, return 20:00 as safe default
-            return '20:00'
-    
+    # OPTIMIZED: Clean invalid time values using vectorized string operations
+    # Previous version called pd.to_datetime() per row - very slow!
+    # Times beyond 20:00 are invalid and should be capped
     try:
-        # Reset index to avoid "cannot reindex on an axis with duplicate labels" error
         all_shifts = all_shifts.reset_index(drop=True)
-        all_shifts['start_time'] = all_shifts['start_time'].apply(clean_time_value)
-        all_shifts['end_time'] = all_shifts['end_time'].apply(clean_time_value)
+
+        for col in ['start_time', 'end_time']:
+            # Extract minutes from "MM:SS" format using vectorized string operations
+            time_parts = all_shifts[col].str.split(':', expand=True)
+            if len(time_parts.columns) >= 2:
+                # Convert minutes to numeric, coercing errors to NaN
+                minutes = pd.to_numeric(time_parts[0], errors='coerce')
+
+                # Build mask for values needing correction
+                needs_cap = (minutes >= 20) & minutes.notna()
+                needs_zero = (minutes < 0) & minutes.notna() & (not live)
+
+                # Apply corrections
+                all_shifts.loc[needs_cap, col] = '20:00'
+                if not live:
+                    all_shifts.loc[needs_zero, col] = '0:00'
     except Exception as e:
         _log_exception_with_dataframe(e, 'scrape_html_shifts.clean_time_value', {
             'all_shifts': all_shifts
@@ -1890,7 +2057,8 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
 
     merged['tmp'] = merged.away_skaters.str.replace("[^0-9]", " ")
 
-    merged['tmp2'] = (merged.tmp.str.strip().str.split("  ")).apply(lambda x: natsorted(x)).apply(lambda x: ' '.join(x))
+    # OPTIMIZED: Combine two .apply() calls into one (reduces function calls from 2N to N)
+    merged['tmp2'] = (merged.tmp.str.strip().str.split("  ")).apply(lambda x: ' '.join(natsorted(x)))
 
     merged['tmp2'] = (merged.away_team_abbreviated.iloc[0] + merged.tmp2).str.replace(" ", away_space).str.replace(" ", ", ")
 
@@ -1902,7 +2070,8 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
 
     merged['tmp'] = merged.home_skaters.str.replace("[^0-9]", " ")
 
-    merged['tmp2'] = (merged.tmp.str.strip().str.split("  ")).apply(lambda x: natsorted(x)).apply(lambda x: ' '.join(x))
+    # OPTIMIZED: Combine two .apply() calls into one (reduces function calls from 2N to N)
+    merged['tmp2'] = (merged.tmp.str.strip().str.split("  ")).apply(lambda x: ' '.join(natsorted(x)))
 
     merged['tmp2'] = (merged.home_team_abbreviated.iloc[0] + merged.tmp2).str.replace(" ", home_space).str.replace(" ", ", ")
 
@@ -1929,20 +2098,114 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
         ), 1, 0
     ))
 
-    merged = merged.assign(change_prio = 
+    merged = merged.assign(change_prio =
                           np.where((merged.team==merged.home_team) & (merged.event=='CHANGE') , 1,
                                   np.where((merged.team==merged.away_team) & (merged.event=='CHANGE'), -1, 0)))
 
-    # TODO: Fix priority map so that we have change before shot or miss if the change involves a player returning from penalty box. 
-    merged = merged.assign(priority = np.where(merged.event.isin(['TAKE', 'GIVE', 'MISS', 'HIT', 'SHOT', 'BLOCK']), 1, 
+    # =========================================================================
+    # FIX: Use HTML PBP on-ice data to determine if CHANGE should come before play events
+    #
+    # If a CHANGE brings on a player who appears on-ice for a play event at the
+    # same game_seconds, that CHANGE must have happened BEFORE the play event.
+    # We detect this by checking if on_numbers appear in play event home_skaters/away_skaters.
+    # =========================================================================
+
+    # Helper to extract jersey numbers from on-ice string (e.g., "18 C 47 C 73 D" -> {'18', '47', '73'})
+    def _extract_jersey_numbers(on_ice_str):
+        if pd.isna(on_ice_str) or not isinstance(on_ice_str, str):
+            return set()
+        # Match digits followed by position letter (C, L, R, D, G, W)
+        return set(re.findall(r'(\d+)\s*[CLDGRW]', on_ice_str))
+
+    # Helper to extract jersey numbers from on_numbers string (e.g., "44, 51" -> {'44', '51'})
+    def _extract_change_numbers(on_numbers_str):
+        if pd.isna(on_numbers_str) or not isinstance(on_numbers_str, str):
+            return set()
+        return set(re.findall(r'(\d+)', on_numbers_str))
+
+    # OPTIMIZED: Vectorized CHANGE ordering (replaces slow nested loop)
+    # Determine if each CHANGE should come BEFORE play events at the same game_seconds
+    # by checking if any player jumping ON appears on-ice for a play event
+    #
+    # IMPORTANT: Reset index first to ensure unique indices. After pd.concat([events, shifts]),
+    # the DataFrame has duplicate indices which causes get_loc() to return boolean masks
+    # instead of integer positions. See docs/CHANGE_ORDERING_BUGS.md for details.
+    merged = merged.reset_index(drop=True)
+    change_should_be_before = np.zeros(len(merged), dtype=bool)
+
+    # Note: FAC is excluded because faceoffs happen AFTER line changes by definition.
+    # The on-ice for FAC reflects the post-change state, so it would incorrectly
+    # mark CHANGEs as should_be_before.
+    play_events = {'TAKE', 'GIVE', 'MISS', 'HIT', 'SHOT', 'BLOCK', 'GOAL'}
+
+    # Step 1: Pre-compute jersey sets for all rows once (avoid repeated parsing)
+    merged['_home_jerseys'] = merged['home_skaters'].apply(_extract_jersey_numbers)
+    merged['_away_jerseys'] = merged['away_skaters'].apply(_extract_jersey_numbers)
+    merged['_on_numbers'] = merged['on_numbers'].apply(_extract_change_numbers)
+
+    # Step 2: Get play events and compute jersey unions per game_seconds
+    play_mask = merged.event.isin(play_events)
+    play_df = merged[play_mask][['game_seconds', '_home_jerseys', '_away_jerseys']]
+
+    if len(play_df) > 0:
+        # Group by game_seconds and compute union of all jerseys from play events
+        def union_sets(series):
+            result = set()
+            for s in series:
+                result |= s
+            return result
+
+        play_unions = play_df.groupby('game_seconds').agg({
+            '_home_jerseys': union_sets,
+            '_away_jerseys': union_sets
+        })
+
+        # Step 3: For each CHANGE event, check intersection with play event jerseys
+        change_mask = merged.event == 'CHANGE'
+        change_indices = merged[change_mask].index.tolist()
+
+        # Pre-fetch data for all CHANGE events (faster than row-by-row access)
+        change_data = merged.loc[change_indices, ['game_seconds', 'team', '_on_numbers']]
+
+        for idx in change_indices:
+            gs = change_data.loc[idx, 'game_seconds']
+            if gs not in play_unions.index:
+                continue
+
+            change_team = change_data.loc[idx, 'team']
+            on_nums = change_data.loc[idx, '_on_numbers']
+
+            if change_team == home_team:
+                relevant = play_unions.loc[gs, '_home_jerseys']
+            elif change_team == away_team:
+                relevant = play_unions.loc[gs, '_away_jerseys']
+            else:
+                continue
+
+            if on_nums & relevant:
+                change_should_be_before[idx] = True
+
+    # Clean up temporary columns
+    merged = merged.drop(columns=['_home_jerseys', '_away_jerseys', '_on_numbers'])
+
+    # Assign priority: CHANGE events that should come before play events get priority 0.5
+    # (between period events at -1/0 and play events at 1)
+    merged = merged.assign(priority = np.where(merged.event.isin(['TAKE', 'GIVE', 'MISS', 'HIT', 'SHOT', 'BLOCK']), 1,
                                                 np.where(merged.event=="GOAL", 2,
                                                     np.where(merged.event=="STOP", 3,
                                                         np.where(merged.event=="DELPEN", 4,
                                                             np.where(merged.event=="PENL", 5,
-                                                                np.where(merged.event=="CHANGE", 6,
-                                                                    np.where(merged.event=="PEND", 7,
-                                                                        np.where(merged.event=="GEND", 8,
-                                                                            np.where(merged.event=="FAC", 9, 0)))))))))).sort_values(by = ['game_seconds', 'period', 'priority', 'event_index', 'change_prio'])
+                                                                np.where((merged.event=="CHANGE") & change_should_be_before, 0.5,
+                                                                    np.where(merged.event=="CHANGE", 6,
+                                                                        np.where(merged.event=="PEND", 7,
+                                                                            np.where(merged.event=="GEND", 8,
+                                                                                np.where(merged.event=="FAC", 9, 0)))))))))))
+
+    # =========================================================================
+    # End of CHANGE ordering fix
+    # =========================================================================
+
+    merged = merged.sort_values(by = ['game_seconds', 'period', 'priority', 'event_index', 'change_prio'])
 
     merged = merged.reset_index(drop = True).reset_index().rename(columns = {'index':'event_index', 'event_index':'original_index'})
 
@@ -2010,21 +2273,21 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
     global home_on
     global away_on
 
-    # OPTIMIZED: Use list comprehension which is faster than .apply() for this operation
-    # Get column names where value is 1, join, and sort
-    home_on_list = []
-    for idx in range(len(homedf)):
-        row = homedf.iloc[idx]
-        players = [col for col in homedf.columns if row[col] == 1]
-        home_on_list.append(','.join(natsorted(players)) if players else '')
-    home_on = pd.DataFrame({0: home_on_list})
+    # OPTIMIZED: Use numpy arrays directly instead of slow pandas .iloc[] access
+    # Convert dataframe to numpy once, then iterate over numpy arrays (10x+ faster)
+    def build_on_ice_strings(df):
+        col_names = df.columns.to_numpy()
+        values = df.values
+        result = [''] * len(values)
+        for i, row in enumerate(values):
+            mask = row == 1
+            if np.any(mask):
+                players = col_names[mask]
+                result[i] = ','.join(natsorted(players))
+        return result
 
-    away_on_list = []
-    for idx in range(len(awaydf)):
-        row = awaydf.iloc[idx]
-        players = [col for col in awaydf.columns if row[col] == 1]
-        away_on_list.append(','.join(natsorted(players)) if players else '')
-    away_on = pd.DataFrame({0: away_on_list})
+    home_on = pd.DataFrame({0: build_on_ice_strings(homedf)})
+    away_on = pd.DataFrame({0: build_on_ice_strings(awaydf)})
 
     away_on = away_on[0].str.split(',', expand=True).rename(columns = {0:'away_on_1', 1:'away_on_2', 2:'away_on_3', 3:'away_on_4', 4:'away_on_5', 5:'away_on_6', 6:'away_on_7', 7:'away_on_8', 8:'away_on_9'})
     home_on = home_on[0].str.split(',', expand=True).rename(columns = {0:'home_on_1', 1:'home_on_2', 2:'home_on_3', 3:'home_on_4', 4:'home_on_5', 5:'home_on_6', 6:'home_on_7', 7:'home_on_8', 8:'home_on_9'})
@@ -2037,6 +2300,68 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
                 (away_on if side == 'away' else home_on)[col] = '\xa0'
 
     game = pd.concat([merged, home_on, away_on], axis = 1)
+
+    # =========================================================================
+    # FIX: Override cumsum-based on-ice tracking with HTML PBP embedded data
+    #
+    # The HTML PBP report embeds the actual on-ice players for each event.
+    # This is more accurate than shift-based tracking for boundary cases where
+    # a goal/shot happens at the exact same second as a line change.
+    #
+    # The NHL's HTML PBP is the source of truth for who was on ice.
+    # =========================================================================
+
+    # Create jersey number -> player name mapping for each team
+    away_jersey_to_name = dict(zip(away_roster['#'].astype(str), away_roster['Name']))
+    home_jersey_to_name = dict(zip(home_roster['#'].astype(str), home_roster['Name']))
+
+    # Pattern to extract jersey numbers from HTML on-ice strings
+    # Format is like "18 C 47 C 73 D 91 D 70 G" with whitespace/newlines
+    jersey_pattern = re.compile(r'(\d+)\s*[CLDGRW]')
+
+    def parse_html_on_ice(html_string, jersey_to_name):
+        """Parse jersey numbers from HTML on-ice string and convert to player names."""
+        if pd.isna(html_string) or not isinstance(html_string, str):
+            return None
+        jerseys = jersey_pattern.findall(html_string)
+        if not jerseys:
+            return None
+        # Convert jersey numbers to player names, skip unknowns
+        names = [jersey_to_name.get(j) for j in jerseys if j in jersey_to_name]
+        return natsorted(names) if names else None
+
+    # OPTIMIZED: Vectorized HTML PBP override (replaces slow row-by-row loop)
+    # Get the source columns for HTML on-ice data
+    away_html_col = 'away_skaters_raw' if 'away_skaters_raw' in game.columns else 'away_skaters'
+    home_html_col = 'home_skaters_raw' if 'home_skaters_raw' in game.columns else 'home_skaters'
+
+    # Parse all HTML strings at once and cache results
+    away_parsed = game[away_html_col].astype(str).apply(lambda x: parse_html_on_ice(x, away_jersey_to_name))
+    home_parsed = game[home_html_col].astype(str).apply(lambda x: parse_html_on_ice(x, home_jersey_to_name))
+
+    # Build arrays for each on-ice column position (1-9)
+    # Only update rows where we have valid parsed data
+    for side, parsed in [('away', away_parsed), ('home', home_parsed)]:
+        # Create mask for rows with valid parsed names
+        has_data = parsed.apply(lambda x: x is not None and len(x) > 0)
+
+        for i in range(1, 10):
+            col_name = f'{side}_on_{i}'
+            pos = i - 1  # 0-indexed position
+
+            # Extract name at this position, or '\xa0' if not enough names
+            def get_name(names, p=pos):
+                if names is None:
+                    return None
+                return names[p] if p < len(names) else '\xa0'
+
+            new_values = parsed.apply(get_name)
+            # Update only rows with parsed data
+            game[col_name] = np.where(has_data, new_values, game[col_name])
+
+    # =========================================================================
+    # End of HTML PBP on-ice override fix
+    # =========================================================================
 
     game = game.assign(
     event_team = np.where(game.event_team==game.home_team, game.home_team_abbreviated,
@@ -2395,39 +2720,42 @@ def fix_missing(single, event_coords, events):
                     recovered_count += 1
 
     if recovered_count > 0:
-        print(f'Fallback merge recovered coordinates for {recovered_count} events')
+        print(f'Fallback merge recovered coordinates for {recovered_count} events for this game: {single.game_id}')
 
     return events
 
-def _fetch_all_pages_parallel(season, game_id, verbose=False):
+def _fetch_all_pages_parallel(season, game_id, verbose=False, include_api=True):
     """
-    Fetch all required HTML pages in parallel.
-    
+    Fetch all required HTML pages and optionally the NHL API in parallel.
+
     Args:
         season: Season string (e.g., '20242025')
         game_id: Full game ID (e.g., 2025020333)
         verbose: If True, print detailed timing information
-    
+        include_api: If True, also fetch NHL API play-by-play endpoint
+
     Returns:
-        Dictionary with keys: 'events', 'roster', 'home_shifts', 'away_shifts'
-        All values are requests.Response objects
+        Dictionary with keys: 'events', 'roster', 'home_shifts', 'away_shifts', 'summary'
+        and optionally 'api'. All values are requests.Response objects.
     """
     small_id = str(game_id)[5:]
-    
+
     # Prepare all URLs
     events_url = f'http://www.nhl.com/scores/htmlreports/{season}/PL0{small_id}.HTM'
     roster_url = f'http://www.nhl.com/scores/htmlreports/{season}/RO0{small_id}.HTM'
     home_shifts_url = f'http://www.nhl.com/scores/htmlreports/{season}/TH0{small_id}.HTM'
     away_shifts_url = f'http://www.nhl.com/scores/htmlreports/{season}/TV0{small_id}.HTM'
     summary_url = f'https://www.nhl.com/scores/htmlreports/{season}/GS0{small_id}.HTM'
-    
-    # Fetch HTML pages concurrently (4 pages)
+    api_url = f'https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play'
+
+    # Fetch all pages concurrently (5 HTML + 1 API = 6 requests)
     fetch_start = time.time()
     if verbose:
-        print('  🔄 Fetching HTML pages in parallel...')
-    
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        # Submit HTML fetch tasks only
+        print('  🔄 Fetching HTML pages and API in parallel...')
+
+    max_workers = 6 if include_api else 5
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit fetch tasks
         futures = {
             'events': executor.submit(_fetch_url, events_url, timeout=10),
             'roster': executor.submit(_fetch_url, roster_url, timeout=10),
@@ -2435,23 +2763,25 @@ def _fetch_all_pages_parallel(season, game_id, verbose=False):
             'away_shifts': executor.submit(_fetch_url, away_shifts_url, timeout=10),
             'summary': executor.submit(_fetch_url, summary_url, timeout=10)
         }
-        
+        if include_api:
+            futures['api'] = executor.submit(_fetch_url, api_url, timeout=30)
+
         # Create reverse mapping from future to key
         future_to_key = {future: key for key, future in futures.items()}
-        
-        # Collect HTML page results as they complete
+
+        # Collect results as they complete
         results = {}
         for future in as_completed(futures.values()):
             key = future_to_key[future]
             results[key] = future.result()  # Will raise if HTTP error
-    
-    html_fetch_duration = time.time() - fetch_start
+
+    fetch_duration = time.time() - fetch_start
     if verbose:
         try:
-            print(f'  ⏱️ HTML pages fetched in: {html_fetch_duration:.2f}s')
+            print(f'  ⏱️ All pages fetched in: {fetch_duration:.2f}s')
         except Exception:
             pass
-    
+
     return results
 
 def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False, verbose = False):
@@ -2483,11 +2813,12 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
             season = str(int(str(game_id)[:4])) + str(int(str(game_id)[:4]) + 1)
             small_id = str(game_id)[5:]
             
-            # OPTIMIZED: Fetch HTML pages in parallel, API separately
+            # OPTIMIZED: Fetch HTML pages and API in parallel
             parallel_start = time.time()
             if verbose:
                 print('Fetching pages')
-            pages = _fetch_all_pages_parallel(season, game_id, verbose=verbose)
+            # Only include API if we're not forcing ESPN fallback
+            pages = _fetch_all_pages_parallel(season, game_id, verbose=verbose, include_api=not shift_to_espn)
             parallel_duration = time.time() - parallel_start
             if verbose:
                 try:
@@ -2512,13 +2843,15 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
             single['game_id'] = int(game_id)
             
             # Try NHL API first (default behavior)
-            
+
             try:
-                # TIME: API Events (fetch after HTML events are processed, like original)
+                # TIME: API Events (using pre-fetched response from parallel fetch)
                 api_start = time.time()
                 if verbose:
                     print('Attempting to scrape coordinates from NHL API')
-                event_coords = scrape_api_events(game_id, drop_description=True, verbose=verbose)
+                # Use pre-fetched API response if available
+                api_response = pages.get('api') if 'api' in pages else None
+                event_coords = scrape_api_events(game_id, drop_description=True, verbose=verbose, api_response=api_response)
                 api_duration = time.time() - api_start
                 if verbose:
                     try:

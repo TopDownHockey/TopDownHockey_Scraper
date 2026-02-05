@@ -55,3 +55,11 @@ twine upload dist/*
 - `src/TopDownHockey_Scraper/TopDownHockey_EliteProspects_Scraper.py` - EP scraping
 - `src/TopDownHockey_Scraper/portrait_links.csv` - Player headshot URL mappings
 - `src/TopDownHockey_Scraper/data/handedness.csv` - Player handedness data
+
+## Live setting
+
+live = True by default on scrapes but if you are scraping old games, make sure to set live = False
+
+## Editing the scraper
+
+If you make changes to the scraper to improve performance on old games, please make sure that is only applied on games before, say, 23-24 or so

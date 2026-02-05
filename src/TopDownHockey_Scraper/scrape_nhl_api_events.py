@@ -179,12 +179,12 @@ def _extract_player_id_from_event(event_details, event_type):
     
     return None
 
-def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbose=False):
+def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbose=False, api_response=None):
     """
     Scrape event coordinates and data from NHL API play-by-play endpoint.
-    
+
     This function replaces scrape_espn_events() by using the official NHL API.
-    
+
     Parameters:
     -----------
     game_id : int
@@ -195,29 +195,36 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
         If True, raises KeyError to trigger ESPN fallback (for compatibility)
     verbose : bool, default False
         If True, print detailed timing information
-    
+    api_response : requests.Response, optional
+        Pre-fetched API response. If provided, skips the network request.
+
     Returns:
     --------
     pd.DataFrame
-        DataFrame with columns: coords_x, coords_y, event_player_1, event, 
-        game_seconds, period, version, goalie_id, goalie_name 
+        DataFrame with columns: coords_x, coords_y, event_player_1, event,
+        game_seconds, period, version, goalie_id, goalie_name
         (and optionally description)
     """
-    
+
     if shift_to_espn:
         raise KeyError("shift_to_espn=True requested, triggering ESPN fallback")
-    
-    # Fetch play-by-play data from NHL API
-    api_url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play"
-    
+
     try:
-        # TIME: Network request
-        net_start = time.time()
-        response = _session.get(api_url, timeout=30)
-        net_duration = time.time() - net_start
-        if verbose:
-            print(f'  ⏱️ API events network request: {net_duration:.2f}s')
-        
+        # Use pre-fetched response if provided, otherwise fetch
+        if api_response is not None:
+            response = api_response
+            if verbose:
+                print(f'  ⏱️ API events using pre-fetched response')
+        else:
+            # Fetch play-by-play data from NHL API
+            api_url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play"
+            # TIME: Network request
+            net_start = time.time()
+            response = _session.get(api_url, timeout=30)
+            net_duration = time.time() - net_start
+            if verbose:
+                print(f'  ⏱️ API events network request: {net_duration:.2f}s')
+
         response.raise_for_status()
         
         # TIME: JSON parsing

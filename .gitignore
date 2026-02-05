@@ -39,6 +39,8 @@ Thumbs.db
 .tox/
 .coverage
 htmlcov/
+tests/
+docs/
 
 *.ipynb
 
