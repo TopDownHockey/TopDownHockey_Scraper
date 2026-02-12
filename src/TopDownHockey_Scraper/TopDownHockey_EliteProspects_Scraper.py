@@ -251,95 +251,108 @@ def getgoalies(league, year):
 def get_info(link):
     """
     A function that is built strictly for the back end and should not be run by the user.
-    """
 
-    page = requests.get(link, timeout = 500)
+    EP redesigned as a Next.js app (2025). Bio data is now embedded as JSON
+    in a <script id="__NEXT_DATA__"> tag rather than <li><span> HTML elements.
+    This version parses that JSON directly.
+    """
+    import json
+
+    url = link if link.startswith('http') else 'https://www.eliteprospects.com' + link
+
+    page = requests.get(url, timeout = 500)
     soup = BeautifulSoup(page.content, "html.parser")
 
     page_string = str(page)
 
-    while ((page_string == '<Response [403]>') or ("evil" in str(soup.p))): 
+    while ((page_string == '<Response [403]>') or ("evil" in str(soup.p))):
         print("403 Error. re-obtaining string and re-trying.")
-        page = requests.get(link, timeout = 500)
+        page = requests.get(url, timeout = 500)
         page_string = str(page)
         soup = BeautifulSoup(page.content, "html.parser")
         time.sleep(60)
 
-    lis = soup.find_all('li')
+    # Parse __NEXT_DATA__ JSON (EP's Next.js data payload)
+    next_data_tag = soup.find('script', id='__NEXT_DATA__')
 
-    relevant_lis = [li for li in lis if li.find('span') is not None]
+    if next_data_tag:
+        try:
+            next_data = json.loads(next_data_tag.string)
+            p = next_data.get('props', {}).get('pageProps', {}).get('playerData', {}).get('player', {})
+        except (json.JSONDecodeError, AttributeError):
+            p = {}
+    else:
+        p = {}
 
-    # player
-    
-    if soup.find("title") != None:
-        player = soup.find("title").string.replace(' - Stats, Contract, Salary & More', '')
+    if p:
+        # player name
+        player = p.get('name', '-')
+
+        # NHL rights & status
+        nhl_rights = p.get('nhlRights')
+        if nhl_rights and isinstance(nhl_rights, dict):
+            team_obj = nhl_rights.get('team', {})
+            rights = team_obj.get('name', '-') if team_obj else '-'
+            status = nhl_rights.get('rights', '-')
+        else:
+            rights = '-'
+            status = '-'
+
+        # date of birth
+        dob = p.get('dateOfBirth', '-') or '-'
+
+        # height (cm)
+        height_obj = p.get('height')
+        if height_obj and isinstance(height_obj, dict):
+            height = str(height_obj.get('metrics', '-'))
+        else:
+            height = '-'
+
+        # weight (kg)
+        weight_obj = p.get('weight')
+        if weight_obj and isinstance(weight_obj, dict):
+            weight = str(weight_obj.get('metrics', '-'))
+        else:
+            weight = '-'
+
+        # birthplace
+        birthplace = p.get('placeOfBirth', '-') or '-'
+
+        # nation
+        nation_obj = p.get('nationality') or p.get('nation')
+        if nation_obj and isinstance(nation_obj, dict):
+            nation = nation_obj.get('name', '-')
+        else:
+            nation = '-'
+
+        # shoots
+        shoots = p.get('shoots', '-') or p.get('catches', '-') or '-'
+
+        # draft
+        draft_data = next_data.get('props', {}).get('pageProps', {}).get('playerData', {}).get('playerDraftSelections', {})
+        draft_edges = draft_data.get('edges', []) if isinstance(draft_data, dict) else []
+        if draft_edges:
+            d = draft_edges[0]
+            draft = f"{d.get('year', '')} round {d.get('round', '')} #{d.get('overall', '')} overall by {d.get('teamName', '')}"
+        else:
+            draft = '-'
     else:
-        player = '-'
-    
-    # status
-    
-    if [li for li in relevant_lis if li.find('span').text=='NHL Rights'] != []:
-        rights = [li for li in relevant_lis if li.find('span').text=='NHL Rights'][0].find('a').text.split(' /')[0]
-    else:
+        # Fallback to title-based name extraction
+        if soup.find("title") != None:
+            player = soup.find("title").string.replace(' - Stats, Contract, Salary & More', '')
+        else:
+            player = '-'
         rights = '-'
-    
-    # rights
-    
-    if [li for li in relevant_lis if li.find('span').text=='NHL Rights'] != []:
-        status = [li for li in relevant_lis if li.find('span').text=='NHL Rights'][0].find('a').text.split(' / ')[1]
-    else:
         status = '-'
-    
-    # dob
-    
-    if [li.find('a')['href'].split('dob=', 1)[1].split('&sort', 1)[0] for li in relevant_lis if li.span.text == 'Date of Birth'] != []:
-        dob = [li.find('a')['href'].split('dob=', 1)[1].split('&sort', 1)[0] for li in relevant_lis if li.span.text == 'Date of Birth'][0]
-    else:
         dob = '-'
-    
-    # height
-    
-    if [li for li in relevant_lis if li.find('span').text=='Height'] != []:
-        height = [li for li in relevant_lis if li.find('span').text=='Height'][0].text.split('Height')[1].split(' cm')[0]
-    else: 
         height = '-'
-    
-    # weight
-    
-    if [li for li in relevant_lis if li.find('span').text=='Weight'] != []:
-        weight = [li for li in relevant_lis if li.find('span').text=='Weight'][0].text.split('Weight')[1].split(' cm')[0]
-    else: 
         weight = '-'
-    
-    # birthplace
-    
-    if [li for li in relevant_lis if li.find('span').text=='Place of Birth'] != []:
-        birthplace = [li for li in relevant_lis if li.find('span').text=='Place of Birth'][0].text.split('Birth')[1]
-    else:
         birthplace = '-'
-    
-    # nation
-    
-    if [li for li in relevant_lis if li.find('span').text=='Nation'] != []:
-        nation = [li for li in relevant_lis if li.find('span').text=='Nation'][0].text.split('Nation')[1]
-    else:
         nation = '-'
-    
-    # shoots
-    
-    if [li for li in relevant_lis if li.find('span').text=='Shoots'] != []:
-        shoots = [li for li in relevant_lis if li.find('span').text=='Shoots'][0].text.split('Shoots')[1]
-    else:
         shoots = '-'
-    
-    # draft
-    
-    if [li for li in relevant_lis if li.find('span').text=='Drafted'] != []:
-        draft = [li for li in relevant_lis if li.find('span').text=='Drafted'][0].text.split('Drafted')[1]
-    else:
         draft = '-'
-    
-    return(player, rights, status, dob, height, weight, birthplace, nation, shoots, draft, link)  
+
+    return(player, rights, status, dob, height, weight, birthplace, nation, shoots, draft, link)
     
 def get_player_information(dataframe):
     '''

@@ -2341,9 +2341,14 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
 
     # Build arrays for each on-ice column position (1-9)
     # Only update rows where we have valid parsed data
+    # Exclude penalty shots: HTML PBP only lists shooter vs goalie (1v1),
+    # but the NHL officially counts penalty shots as even strength with the
+    # full on-ice lineup. Keep the shift-based data for these events.
+    is_penalty_shot = game['description'].str.contains('Penalty Shot', na=False)
+
     for side, parsed in [('away', away_parsed), ('home', home_parsed)]:
-        # Create mask for rows with valid parsed names
-        has_data = parsed.apply(lambda x: x is not None and len(x) > 0)
+        # Create mask for rows with valid parsed names (excluding penalty shots)
+        has_data = parsed.apply(lambda x: x is not None and len(x) > 0) & ~is_penalty_shot
 
         for i in range(1, 10):
             col_name = f'{side}_on_{i}'

@@ -4,29 +4,28 @@ Create a new GitHub release for TopDownHockey_Scraper.
 
 ## Instructions
 
-When the user invokes `/release`, follow these steps:
+When the user invokes `/release`, follow these steps **automatically without asking**:
 
 1. **Read the current version** from `setup.py` and `setup.cfg` (look for the `version="X.Y.Z"` and `version = "X.Y.Z"` lines)
 
-2. **Check git status** to ensure working directory is clean (no uncommitted changes)
-   - If there ARE uncommitted changes, ask the user if they want to commit them first
-   - If yes: stage and commit the changes with an appropriate message, then bump the version
-   - Don't silently skip uncommitted changes - they're often the reason for the release!
+2. **Check git status** for uncommitted changes
+   - If there ARE uncommitted changes: **automatically commit them** with an appropriate message based on what changed
+   - Uncommitted changes are usually the reason for the release, so always include them
 
-3. **Run the test suite** to verify the scraper works:
+3. **Bump the version** automatically:
+   - Increment the patch version (X.Y.Z → X.Y.Z+1) in both `setup.py` and `setup.cfg`
+   - Commit the version bump along with any other changes
+
+4. **Run the test suite** (tests run automatically via pre-push hook, but if not):
    ```bash
    PYTHONPATH="src:$PYTHONPATH" python3 -m pytest tests/ -v --tb=short
    ```
    If tests fail, stop and report the failure.
 
-4. **Check if tag already exists**:
+5. **Push changes and create tag**:
    ```bash
-   git tag -l "vX.Y.Z"
-   ```
-   If tag exists, ask user if they want to bump the version first.
-
-5. **Create and push the git tag**:
-   ```bash
+   gh auth setup-git  # Ensure git can authenticate
+   git push origin main
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
    git push origin vX.Y.Z
    ```
@@ -39,9 +38,14 @@ When the user invokes `/release`, follow these steps:
 
 7. **Report success** with a link to the new release.
 
+## Key Behavior
+
+- **DO NOT ASK** for permission to commit changes or bump version - just do it
+- **DO NOT ASK** if the user wants to proceed - the `/release` command is the signal to proceed
+- If the tag already exists, bump the version first, then continue
+- If `gh auth status` fails, instruct the user to run `gh auth login`
+
 ## Notes
 
-- **GitHub Action auto-creates releases**: When you push a version bump commit, a GitHub Action auto-creates a tag and draft release. You may need to update the release notes with `gh release edit vX.Y.Z --notes "..."` instead of creating a new release.
 - Authentication is handled by the user's local `gh` CLI credentials (stored in system keyring, never in the repo)
 - No API tokens or secrets should ever be committed to this repository
-- If `gh auth status` fails, instruct the user to run `gh auth login`
