@@ -237,7 +237,6 @@ def scrape_schedule(start_date, end_date):
         datedf = pd.DataFrame(date_df.games.iloc[i])
         gamedf_list.append(datedf)
     gamedf = pd.concat(gamedf_list, ignore_index=True) if gamedf_list else pd.DataFrame()
-    global team_df
     team_df = pd.DataFrame(gamedf['teams'].values.tolist(), index = gamedf.index)
     away_df = pd.DataFrame(team_df['away'].values.tolist(), index = team_df.index)
     home_df = pd.DataFrame(team_df['home'].values.tolist(), index = team_df.index)
@@ -1162,8 +1161,6 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
             away_shifts, away_soup, away_goalie_names, away_team_name, 'away'
         )
 
-    global all_shifts
-
     home_shifts = home_shifts[~home_shifts.duration.str.startswith('-')]
     away_shifts = away_shifts[~away_shifts.duration.str.startswith('-')]
     
@@ -1291,9 +1288,6 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     # (all_shifts.period_gs==1),
     # '20:00', all_shifts.end_time))
     
-    global myshifts
-    global changes_on
-    global changes_off
     myshifts = all_shifts
     #print('Printing my shifts')
 
@@ -1834,9 +1828,6 @@ def scrape_espn_events(espn_game_id, drop_description = True):
     #espn_events = espn_events.assign(event_player_1 = np.where(
     #espn_events.event_player_1=='ALEX BURROWS', 'ALEXANDRE BURROWS', espn_events.event_player_1))
     
-    global look
-    look = espn_events
-    
     espn_events['coords_x'] = np.where(espn_events['coords_x']>99, 99, espn_events['coords_x'])
     espn_events['coords_y'] = np.where(espn_events['coords_y']<(-42), (-42), espn_events['coords_y'])
 
@@ -2257,8 +2248,6 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
     
     awaydf = pd.DataFrame(awaydf_dict)
 
-    global homedf
-
     # OPTIMIZED: Same optimization for home roster
     homedf_dict = {}
     for i in range(0, len(home_roster)):
@@ -2270,9 +2259,6 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
         homedf_dict[home_roster.Name.iloc[i]] = vec
     
     homedf = pd.DataFrame(homedf_dict)
-
-    global home_on
-    global away_on
 
     # OPTIMIZED: Use numpy arrays directly instead of slow pandas .iloc[] access
     # Convert dataframe to numpy once, then iterate over numpy arrays (10x+ faster)
@@ -2791,12 +2777,6 @@ def _fetch_all_pages_parallel(season, game_id, verbose=False, include_api=True):
     return results
 
 def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False, verbose = False):
-    
-    global single
-    global event_coords
-    global full
-    global fixed_events
-    global events
     
     # OPTIMIZED: Use list instead of DataFrame for accumulating results
     full_list = []
