@@ -459,6 +459,7 @@ def backfill_missing_goalie_shifts_from_period_summary(shifts_df, soup, goalie_n
         return shifts_df
 
     # Convert period to int for comparison
+    goalie_summary = goalie_summary[goalie_summary.period != '\xa0'].copy()
     goalie_summary['period_int'] = goalie_summary.period.replace('OT', '4').astype(int)
 
     # Check which periods are missing individual shifts for each goalie
@@ -473,7 +474,7 @@ def backfill_missing_goalie_shifts_from_period_summary(shifts_df, soup, goalie_n
         # Check if this goalie has any individual shifts for this period
         existing_shifts = shifts_df[
             (shifts_df.name.str.upper() == goalie_name) &
-            (shifts_df.period.astype(str).replace('OT', '4').astype(int) == period)
+            (shifts_df.period.astype(str).replace({'\xa0': '0', 'OT': '4'}).astype(int) == period)
         ]
 
         if len(existing_shifts) == 0 and toi and toi not in ['', '\xa0']:
@@ -896,7 +897,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             home_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
-            home_clock_period = max(home_shifts.period.replace('OT', 4).astype(int))
+            home_clock_period = max(home_shifts[home_shifts.period != '\xa0'].period.replace('OT', 4).astype(int))
 
             start_times_seconds = home_clock_time_now
 
@@ -1102,7 +1103,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             away_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
-            away_clock_period = max(away_shifts.period.replace('OT', 4).astype(int))
+            away_clock_period = max(away_shifts[away_shifts.period != '\xa0'].period.replace('OT', 4).astype(int))
 
             start_times_seconds = away_clock_time_now
 
