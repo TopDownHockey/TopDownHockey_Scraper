@@ -216,11 +216,12 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
             if verbose:
                 print(f'  ⏱️ API events using pre-fetched response')
         else:
-            # Fetch play-by-play data from NHL API
+            # Fetch play-by-play data from NHL API with retry logic
+            from TopDownHockey_Scraper.TopDownHockey_NHL_Scraper import _fetch_url
             api_url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play"
             # TIME: Network request
             net_start = time.time()
-            response = _session.get(api_url, timeout=30)
+            response = _fetch_url(api_url, timeout=30)
             net_duration = time.time() - net_start
             if verbose:
                 print(f'  ⏱️ API events network request: {net_duration:.2f}s')

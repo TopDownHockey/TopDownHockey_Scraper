@@ -22,8 +22,9 @@ from requests.exceptions import ChunkedEncodingError
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from TopDownHockey_Scraper.scrape_nhl_api_events import scrape_api_events
+from TopDownHockey_Scraper.shift_processing_api import scrape_api_shifts
 
-print('Successfully did local install plus update - OPTIMIZED VERSION (Round 1: _append(), Round 2: name corrections, Round 3: vectorization, Round 4: parallel network requests)')
+print('Successfully did local install plus update - V2 with API-based shifts')
 
 # ========== OPTIMIZATIONS ==========
 # Create a persistent session with connection pooling
@@ -237,6 +238,7 @@ def scrape_schedule(start_date, end_date):
         datedf = pd.DataFrame(date_df.games.iloc[i])
         gamedf_list.append(datedf)
     gamedf = pd.concat(gamedf_list, ignore_index=True) if gamedf_list else pd.DataFrame()
+    global team_df
     team_df = pd.DataFrame(gamedf['teams'].values.tolist(), index = gamedf.index)
     away_df = pd.DataFrame(team_df['away'].values.tolist(), index = team_df.index)
     home_df = pd.DataFrame(team_df['home'].values.tolist(), index = team_df.index)
@@ -458,7 +460,6 @@ def backfill_missing_goalie_shifts_from_period_summary(shifts_df, soup, goalie_n
         return shifts_df
 
     # Convert period to int for comparison
-    goalie_summary = goalie_summary[goalie_summary.period != '\xa0'].copy()
     goalie_summary['period_int'] = goalie_summary.period.replace('OT', '4').astype(int)
 
     # Check which periods are missing individual shifts for each goalie
@@ -473,7 +474,7 @@ def backfill_missing_goalie_shifts_from_period_summary(shifts_df, soup, goalie_n
         # Check if this goalie has any individual shifts for this period
         existing_shifts = shifts_df[
             (shifts_df.name.str.upper() == goalie_name) &
-            (shifts_df.period.astype(str).replace({'\xa0': '0', 'OT': '4'}).astype(int) == period)
+            (shifts_df.period.astype(str).replace('OT', '4').astype(int) == period)
         ]
 
         if len(existing_shifts) == 0 and toi and toi not in ['', '\xa0']:
@@ -896,7 +897,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             home_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
-            home_clock_period = max(home_shifts[home_shifts.period != '\xa0'].period.replace('OT', 4).astype(int))
+            home_clock_period = max(home_shifts.period.replace('OT', 4).astype(int))
 
             start_times_seconds = home_clock_time_now
 
@@ -1102,7 +1103,7 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
 
             away_clock_time_now = convert_seconds_to_clock(latest_shift_end)
 
-            away_clock_period = max(away_shifts[away_shifts.period != '\xa0'].period.replace('OT', 4).astype(int))
+            away_clock_period = max(away_shifts.period.replace('OT', 4).astype(int))
 
             start_times_seconds = away_clock_time_now
 
@@ -1160,6 +1161,8 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
         away_shifts = backfill_missing_goalie_shifts_from_period_summary(
             away_shifts, away_soup, away_goalie_names, away_team_name, 'away'
         )
+
+    global all_shifts
 
     home_shifts = home_shifts[~home_shifts.duration.str.startswith('-')]
     away_shifts = away_shifts[~away_shifts.duration.str.startswith('-')]
@@ -1288,6 +1291,9 @@ def scrape_html_shifts(season, game_id, live = True, home_page=None, away_page=N
     # (all_shifts.period_gs==1),
     # '20:00', all_shifts.end_time))
     
+    global myshifts
+    global changes_on
+    global changes_off
     myshifts = all_shifts
     #print('Printing my shifts')
 
@@ -1828,6 +1834,9 @@ def scrape_espn_events(espn_game_id, drop_description = True):
     #espn_events = espn_events.assign(event_player_1 = np.where(
     #espn_events.event_player_1=='ALEX BURROWS', 'ALEXANDRE BURROWS', espn_events.event_player_1))
     
+    global look
+    look = espn_events
+    
     espn_events['coords_x'] = np.where(espn_events['coords_x']>99, 99, espn_events['coords_x'])
     espn_events['coords_y'] = np.where(espn_events['coords_y']<(-42), (-42), espn_events['coords_y'])
 
@@ -2248,6 +2257,8 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
     
     awaydf = pd.DataFrame(awaydf_dict)
 
+    global homedf
+
     # OPTIMIZED: Same optimization for home roster
     homedf_dict = {}
     for i in range(0, len(home_roster)):
@@ -2259,6 +2270,9 @@ def merge_and_prepare(events, shifts, roster=None, live = False):
         homedf_dict[home_roster.Name.iloc[i]] = vec
     
     homedf = pd.DataFrame(homedf_dict)
+
+    global home_on
+    global away_on
 
     # OPTIMIZED: Use numpy arrays directly instead of slow pandas .iloc[] access
     # Convert dataframe to numpy once, then iterate over numpy arrays (10x+ faster)
@@ -2720,6 +2734,9 @@ def _fetch_all_pages_parallel(season, game_id, verbose=False, include_api=True):
     """
     Fetch all required HTML pages and optionally the NHL API in parallel.
 
+    V2: No longer fetches HTML shift pages (home_shifts, away_shifts) since
+    shifts are now fetched from the NHL REST API in scrape_api_shifts().
+
     Args:
         season: Season string (e.g., '20242025')
         game_id: Full game ID (e.g., 2025020333)
@@ -2727,32 +2744,28 @@ def _fetch_all_pages_parallel(season, game_id, verbose=False, include_api=True):
         include_api: If True, also fetch NHL API play-by-play endpoint
 
     Returns:
-        Dictionary with keys: 'events', 'roster', 'home_shifts', 'away_shifts', 'summary'
+        Dictionary with keys: 'events', 'roster', 'summary'
         and optionally 'api'. All values are requests.Response objects.
     """
     small_id = str(game_id)[5:]
 
-    # Prepare all URLs
+    # Prepare URLs (V2: skip HTML shift pages, use API shifts instead)
     events_url = f'http://www.nhl.com/scores/htmlreports/{season}/PL0{small_id}.HTM'
     roster_url = f'http://www.nhl.com/scores/htmlreports/{season}/RO0{small_id}.HTM'
-    home_shifts_url = f'http://www.nhl.com/scores/htmlreports/{season}/TH0{small_id}.HTM'
-    away_shifts_url = f'http://www.nhl.com/scores/htmlreports/{season}/TV0{small_id}.HTM'
     summary_url = f'https://www.nhl.com/scores/htmlreports/{season}/GS0{small_id}.HTM'
     api_url = f'https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play'
 
-    # Fetch all pages concurrently (5 HTML + 1 API = 6 requests)
+    # Fetch pages concurrently (V2: 3 HTML + optionally 1 API = 3-4 requests)
     fetch_start = time.time()
     if verbose:
-        print('  🔄 Fetching HTML pages and API in parallel...')
+        print('  Fetching HTML pages and API in parallel (V2: API shifts)...')
 
-    max_workers = 6 if include_api else 5
+    max_workers = 4 if include_api else 3
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit fetch tasks
+        # Submit fetch tasks (no more home_shifts/away_shifts HTML pages)
         futures = {
             'events': executor.submit(_fetch_url, events_url, timeout=10),
             'roster': executor.submit(_fetch_url, roster_url, timeout=10),
-            'home_shifts': executor.submit(_fetch_url, home_shifts_url, timeout=10),
-            'away_shifts': executor.submit(_fetch_url, away_shifts_url, timeout=10),
             'summary': executor.submit(_fetch_url, summary_url, timeout=10)
         }
         if include_api:
@@ -2770,13 +2783,19 @@ def _fetch_all_pages_parallel(season, game_id, verbose=False, include_api=True):
     fetch_duration = time.time() - fetch_start
     if verbose:
         try:
-            print(f'  ⏱️ All pages fetched in: {fetch_duration:.2f}s')
+            print(f'  All pages fetched in: {fetch_duration:.2f}s')
         except Exception:
             pass
 
     return results
 
 def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_intermediates = False, verbose = False):
+    
+    global single
+    global event_coords
+    global full
+    global fixed_events
+    global events
     
     # OPTIMIZED: Use list instead of DataFrame for accumulating results
     full_list = []
@@ -2828,16 +2847,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     pass
             single['game_id'] = int(game_id)
             
-            # Extract rosterSpots from pre-fetched API response (used by live-games-pbp for player mapping)
-            roster_spots_json = None
-            api_response = pages.get('api') if 'api' in pages else None
-            if api_response is not None and return_intermediates:
-                try:
-                    api_json = json.loads(api_response.content)
-                    roster_spots_json = api_json.get('rosterSpots', None)
-                except Exception:
-                    pass
-
             # Try NHL API first (default behavior)
 
             try:
@@ -2846,6 +2855,7 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                 if verbose:
                     print('Attempting to scrape coordinates from NHL API')
                 # Use pre-fetched API response if available
+                api_response = pages.get('api') if 'api' in pages else None
                 event_coords = scrape_api_events(game_id, drop_description=True, verbose=verbose, api_response=api_response)
                 api_duration = time.time() - api_start
                 if verbose:
@@ -2895,29 +2905,23 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                     continue
                 if verbose:
                     print(pages)
-                # TIME: Shifts and Finalize (using pre-fetched pages)
+                # TIME: Shifts and Finalize (V2: using API shifts)
                 try:
                     if verbose:
                         print(pages)
                     shifts_start = time.time()
                     if live == True:
-                        min_game_clock, shifts = scrape_html_shifts(season, small_id, live, 
-                                                    home_page=pages['home_shifts'],
-                                                    away_page=pages['away_shifts'],
-                                                    summary = pages['summary'],
-                                                    roster_cache = roster_cache,
+                        min_game_clock, shifts = scrape_api_shifts(game_id, live,
+                                                    roster_cache=roster_cache,
                                                     verbose=verbose)
                     else:
-                        shifts = scrape_html_shifts(season, small_id, live, 
-                                                    home_page=pages['home_shifts'],
-                                                    away_page=pages['away_shifts'],
-                                                    summary = pages['summary'],
-                                                    roster_cache = roster_cache,
+                        shifts = scrape_api_shifts(game_id, live,
+                                                    roster_cache=roster_cache,
                                                     verbose=verbose)
                     shifts_duration = time.time() - shifts_start
                     if verbose:
                         try:
-                            print(f'⏱️ HTML shifts processing took: {shifts_duration:.2f}s')
+                            print(f'API shifts processing took: {shifts_duration:.2f}s')
                         except Exception:
                             pass
                     
@@ -2943,7 +2947,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'shifts': shifts.copy() if shifts is not None else None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
                             'roster_cache': roster_cache.copy() if roster_cache is not None else None,
-                            'roster_spots': roster_spots_json,
                             'coordinate_source': 'api',
                             'warning': None,
                             'error': None,
@@ -2972,7 +2975,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                             'shifts': None,
                             'api_coords': api_coords.copy() if 'api_coords' in locals() else None,
                             'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
-                            'roster_spots': roster_spots_json,
                             'coordinate_source': 'api',
                             'warning': 'NO SHIFT DATA.',
                             'error': None,
@@ -3056,16 +3058,13 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         print('This game does not have ESPN or API coordinates. You will get it anyway, though.')
                         events = single
                     try:
-                        shifts = scrape_html_shifts(season, small_id, live,
-                                                    home_page=pages['home_shifts'],
-                                                    away_page=pages['away_shifts'],
-                                                    summary = pages['summary'],
-                                                    roster_cache = roster_cache,
+                        shifts = scrape_api_shifts(game_id, live,
+                                                    roster_cache=roster_cache,
                                                     verbose=verbose)
                         finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                         full_list.append(finalized)
                         second_time = time.time()
-                        
+
                         # Track intermediates if requested
                         if return_intermediates:
                             intermediates_list.append({
@@ -3073,7 +3072,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'shifts': shifts.copy() if shifts is not None else None,
                                 'api_coords': None,
                                 'roster_cache': roster_cache.copy() if roster_cache is not None else None,
-                                'roster_spots': roster_spots_json,
                                 'coordinate_source': 'espn',
                                 'warning': None,
                                 'error': None,
@@ -3099,7 +3097,6 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                                 'shifts': None,
                                 'api_coords': None,
                                 'roster_cache': roster_cache.copy() if 'roster_cache' in locals() and roster_cache is not None else None,
-                                'roster_spots': roster_spots_json,
                                 'coordinate_source': 'espn',
                                 'warning': 'NO SHIFT DATA',
                                 'error': None,
@@ -3255,16 +3252,13 @@ def full_scrape_1by1(game_id_list, live = False, shift_to_espn = True, return_in
                         coord_source_for_intermediates = 'none'
                     
                     try:
-                        shifts = scrape_html_shifts(season, small_id, live,
-                                                    home_page=pages['home_shifts'],
-                                                    away_page=pages['away_shifts'],
-                                                    summary = pages['summary'],
-                                                    roster_cache = roster_cache,
+                        shifts = scrape_api_shifts(game_id, live,
+                                                    roster_cache=roster_cache,
                                                     verbose=verbose)
                         finalized = merge_and_prepare(events, shifts, roster_cache, live = live)
                         full_list.append(finalized)
                         second_time = time.time()
-                        
+
                         # Track intermediates if requested
                         if return_intermediates:
                             intermediates_list.append({
