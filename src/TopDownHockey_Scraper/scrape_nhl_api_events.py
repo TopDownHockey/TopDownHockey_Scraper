@@ -15,6 +15,19 @@ import os
 
 # Use the same session pattern as the main scraper
 _session = requests.Session()
+_session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+    'Origin': 'https://www.nhl.com',
+    'Referer': 'https://www.nhl.com/',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'sec-ch-ua': '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'cross-site',
+})
 
 from TopDownHockey_Scraper.name_corrections import NAME_CORRECTIONS, normalize_player_name
 
