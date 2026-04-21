@@ -307,11 +307,12 @@ def scrape_api_events(game_id, drop_description=True, shift_to_espn=False, verbo
         else:
             minutes, seconds = 0, 0
         
-        # Calculate game_seconds
-        if period < 5:
-            game_seconds = ((period - 1) * 1200) + (minutes * 60) + seconds
-        else:
-            game_seconds = 3900  # Overtime
+        # Calculate game_seconds — per-event time, consistent across all periods.
+        # The HTML flow in TopDownHockey_NHL_Scraper computes (period-1)*1200 + period_seconds
+        # for every period, so the API side must match for fix_missing's timing-based
+        # merge to recover coords. In playoffs, period 5+ is 2OT/3OT/... and each event
+        # has distinct timing; hardcoding 3900 here broke coord recovery for multi-OT games.
+        game_seconds = ((period - 1) * 1200) + (minutes * 60) + seconds
         
         # Extract event type
         event_type_code = play.get('typeCode')
