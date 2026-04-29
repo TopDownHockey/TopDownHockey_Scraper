@@ -32,10 +32,29 @@ def tableDataText(table):
         trs = trs[1:]
     for tr in trs: # for every table row
         rows.append([td.get_text(strip=True) for td in tr.find_all('td')]) # data row
-        
-    df_rows = pd.DataFrame(rows[1:], columns=rows[0])
-    
+
+    ncols = len(rows[0])
+    data_rows = [r for r in rows[1:] if len(r) == ncols]
+    df_rows = pd.DataFrame(data_rows, columns=rows[0])
+
     return df_rows
+
+
+def _find_stats_table(soup, kind):
+    """
+    EP redesigned (2025) and the old table classes no longer exist. Select the
+    stats table by inspecting its header row instead.
+    kind: 'skater' or 'goalie'
+    """
+    for table in soup.find_all('table'):
+        headers = [th.get_text(strip=True).upper() for th in table.find_all('th')]
+        if not headers:
+            continue
+        if kind == 'skater' and 'TP' in headers and 'GP' in headers:
+            return table
+        if kind == 'goalie' and 'GAA' in headers and 'SV%' in headers:
+            return table
+    return None
 
 def getskaters(league, year):  
     """
@@ -78,9 +97,9 @@ def getskaters(league, year):
                 
             soup = BeautifulSoup(page.content, "html.parser")
 
-            # Get data for players table
-            player_table = soup.find( "table", {"class":"table table-striped table-sortable player-stats highlight-stats season"})
-            
+            # Get data for players table (EP redesigned in 2025; select by header content)
+            player_table = _find_stats_table(soup, 'skater')
+
             try:
                 df_players = tableDataText(player_table)
                 
@@ -154,7 +173,7 @@ def getgoalies(league, year):
     A function that is built strictly for the back end and should not be run by the user.
     """
 
-    url = 'https://www.eliteprospects.com/league/' + league + '/stats/' + year + '?page-goalie='
+    url = 'https://www.eliteprospects.com/league/' + league + '/stats/' + year + '?tab=goalies&page='
     # print('Collects data from ' + 'https://www.eliteprospects.com/league/' + league + '/stats/' + year)
     
     print("Beginning scrape of " + league + " goalie data from " + year + ".")
@@ -191,8 +210,8 @@ def getgoalies(league, year):
                 
             soup = BeautifulSoup(page.content, "html.parser")
 
-            # Get data for players table
-            player_table = soup.find("table", {"class":"table table-striped table-sortable goalie-stats highlight-stats season"})
+            # Get data for goalies table (EP redesigned in 2025; select by header content)
+            player_table = _find_stats_table(soup, 'goalie')
 
             try:
                 df_players = tableDataText(player_table)
